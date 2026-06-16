@@ -1,0 +1,45 @@
+{
+  "id": "io.github.soundwave.Soundwave",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "46",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
+  "command": "soundwave",
+  "finish-args": [
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--share=ipc",
+    "--device=dri",
+    "--filesystem=home:ro",
+    "--filesystem=xdg-music:ro",
+    "--socket=pulseaudio",
+    "--talk-name=org.mpris.MediaPlayer2.*",
+    "--talk-name=org.freedesktop.DBus"
+  ],
+  "build-options": {
+    "env": {
+      "PIP_REQUIRE_VIRTUALENV": "false"
+    }
+  },
+  "modules": [
+    {
+      "name": "soundwave",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install mutagen --prefix=/app",
+        "pip3 install . --prefix=/app",
+        "install -Dm644 data/icons/soundwave.svg /app/share/icons/hicolor/scalable/apps/io.github.soundwave.Soundwave.svg",
+        "install -Dm644 flatpak/soundwave.desktop /app/share/applications/io.github.soundwave.Soundwave.desktop",
+        "install -Dm644 flatpak/io.github.soundwave.Soundwave.metainfo.xml /app/share/metainfo/io.github.soundwave.Soundwave.metainfo.xml"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "/"
+        }
+      ]
+    }
+  ]
+}

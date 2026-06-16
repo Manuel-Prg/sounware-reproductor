@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.soundwave.Soundwave</id>
+  <name>Soundwave</name>
+  <summary>Reproductor de música moderno para Linux</summary>
+  <developer_name>Soundwave Team</developer_name>
+  <categories>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <description>
+    <p>Soundwave es un reproductor de música moderno para Linux con interfaz GTK4 y Adwaita.</p>
+    <p>Características:</p>
+    <ul>
+      <li>Reproducción de audio con GStreamer</li>
+      <li>Soporte para MP3, FLAC, OGG, Opus, M4A, WAV y más</li>
+      <li>Biblioteca musical con escaneo automático</li>
+      <li>Vista por álbumes, artistas y géneros</li>
+      <li>Carátulas de álbumes embebidas y externas</li>
+      <li>Ecualizador de 10 bandas con preajustes</li>
+      <li>Mini reproductor compacto</li>
+      <li>Scrobbling a Last.fm</li>
+      <li>Soporte MPRIS para atajos globales</li>
+      <li>Listas de reproducción persistentes</li>
+    </ul>
+  </description>
+  <url type="homepage">https://github.com/soundwave/soundwave</url>
+  <launchable type="desktop-id">io.github.soundwave.Soundwave.desktop</launchable>
+  <provides>
+    <dbus>org.mpris.MediaPlayer2.soundwave</dbus>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Ventana principal de Soundwave</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.1.0" date="2025-01-01"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

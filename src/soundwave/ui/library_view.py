@@ -29,6 +29,12 @@ class LibraryView(Gtk.Box):
         self._title_label = Gtk.Label(label="Todas las canciones")
         self._title_label.set_css_classes(["title"])
         self._header.set_title_widget(self._title_label)
+
+        self.search_entry = Gtk.SearchEntry()
+        self.search_entry.set_placeholder_text("Buscar canciones, artistas...")
+        self.search_entry.set_size_request(240, -1)
+        self._header.pack_end(self.search_entry)
+
         self.append(self._header)
 
         self._stack = Gtk.Stack()
@@ -227,15 +233,15 @@ class LibraryView(Gtk.Box):
         return row
 
     def _build_album_card(self, album: dict) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_size_request(150, 180)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_size_request(160, 220)
+        box.add_css_class("album-card")
 
-        # Album art
-        art_box = Gtk.Box()
-        art_box.set_size_request(150, 150)
+        # Overlay for cover art + play button
+        overlay = Gtk.Overlay()
 
         picture = Gtk.Picture()
-        picture.set_size_request(150, 150)
+        picture.set_size_request(160, 160)
         picture.set_content_fit(Gtk.ContentFit.COVER)
         picture.set_css_classes(["album-cover"])
 
@@ -253,14 +259,27 @@ class LibraryView(Gtk.Box):
         if not art_found:
             picture.set_paintable(None)
 
-        art_box.append(picture)
-        box.append(art_box)
+        overlay.set_child(picture)
+
+        # Floating Play Button
+        play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
+        play_btn.set_css_classes(["play-button-card", "circular"])
+        play_btn.set_halign(Gtk.Align.END)
+        play_btn.set_valign(Gtk.Align.END)
+        play_btn.set_margin_end(8)
+        play_btn.set_margin_bottom(8)
+        play_btn.set_size_request(36, 36)
+        play_btn.connect("clicked", lambda b, a=album: self._on_album_clicked(a))
+        overlay.add_overlay(play_btn)
+
+        box.append(overlay)
 
         # Title
         title = Gtk.Label(label=album["album"])
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_max_width_chars(18)
         title.set_xalign(0)
+        title.add_css_class("heading")
         box.append(title)
 
         # Subtitle
@@ -271,7 +290,7 @@ class LibraryView(Gtk.Box):
         subtitle.add_css_class("caption")
         box.append(subtitle)
 
-        # Click handler - play album
+        # Click handler - play album (double click or general card click)
         gesture = Gtk.GestureClick()
         gesture.connect("pressed", lambda g, n, x, y, a=album: self._on_album_clicked(a))
         box.add_controller(gesture)

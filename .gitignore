@@ -9,6 +9,7 @@ build/
 .Python
 env/
 venv/
+.venv/
 .env
 *.swp
 *.swo

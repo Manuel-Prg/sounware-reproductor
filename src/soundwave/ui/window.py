@@ -15,6 +15,7 @@ from soundwave.ui.library_view import LibraryView
 from soundwave.ui.search_bar import SearchBar
 from soundwave.ui.equalizer import EqualizerDialog
 from soundwave.ui.mini_player import MiniPlayer
+from soundwave.ui.settings import SettingsDialog
 
 
 class SoundwaveWindow(Adw.ApplicationWindow):
@@ -36,31 +37,30 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(self._main_box)
 
-        # Search bar
-        self._search_bar = SearchBar()
-        self._search_bar.connect_search(self._on_search)
-        self._main_box.append(self._search_bar)
-
-        # Paned: sidebar + content
-        self._paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        self._paned.set_shrink_start_child(False)
-        self._paned.set_shrink_end_child(False)
-        self._main_box.append(self._paned)
-
         # Sidebar
         self._sidebar = self._build_sidebar()
-        self._paned.set_start_child(self._sidebar)
 
         # Library view (main content)
         self._library_view = LibraryView(db, player)
         self._library_view.connect_play_song(self._on_play_song)
         self._library_view.connect_queue_song(self._on_queue_song)
-        self._paned.set_end_child(self._library_view)
+        self._library_view.search_entry.connect("search-changed", self._on_search_changed)
+
+        # SplitView: sidebar + content
+        self._split_view = Adw.OverlaySplitView()
+        self._split_view.set_sidebar(self._sidebar)
+        self._split_view.set_content(self._library_view)
+        self._split_view.set_min_sidebar_width(220)
+        self._split_view.set_max_sidebar_width(280)
+        self._split_view.set_vexpand(True)
+        self._main_box.append(self._split_view)
 
         # Player bar at bottom
         self._player_bar = PlayerBar(player)
         self._player_bar.connect_toggle_mini(self._on_toggle_mini)
         self._player_bar.connect_show_equalizer(self._on_show_equalizer)
+        self._player_bar.connect_toggle_fullscreen(self._toggle_fullscreen)
+        self._player_bar.connect_toggle_sidebar(self._toggle_sidebar)
         self._main_box.append(self._player_bar)
 
         # Mini player (hidden initially)
@@ -76,35 +76,84 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         # Connect player signals for MPRIS last.fm integration
         self.player.connect_song(self._on_player_song_changed)
 
+        # Sync fullscreen button state when window state changes
+        self.connect("notify::fullscreened", self._on_fullscreen_changed)
+
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
         css = """
+        @define-color accent_bg_color #7f39fb;
+        @define-color accent_color #7f39fb;
+        @define-color accent_fg_color #ffffff;
+
+        @media (prefers-color-scheme: dark) {
+            @define-color window_bg_color #121212;
+            @define-color card_bg_color #1e1e1e;
+            .navigation-sidebar {
+                background-color: #1a1a1a;
+            }
+        }
+        @media (prefers-color-scheme: light) {
+            @define-color window_bg_color #f6f6f6;
+            @define-color card_bg_color #ffffff;
+            .navigation-sidebar {
+                background-color: #ffffff;
+                border-right: 1px solid alpha(black, 0.08);
+            }
+        }
+
         .sidebar-row {
-            border-radius: 8px;
-            margin: 2px 8px;
+            border-radius: 99px;
+            margin: 4px 12px;
+            padding: 8px 16px;
         }
         .sidebar-row:selected {
-            background-color: alpha(@accent_bg_color, 0.3);
+            background-color: @accent_bg_color;
+            color: @accent_fg_color;
         }
         .player-bar {
             background-color: @window_bg_color;
             border-top: 1px solid @borders;
+            padding: 10px 16px;
         }
         .album-cover {
-            border-radius: 6px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         .album-grid {
             margin: 12px;
         }
+        .album-card {
+            padding: 10px;
+            border-radius: 12px;
+            background-color: @card_bg_color;
+            transition: all 0.2s ease;
+        }
+        .album-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+        .play-button-card {
+            background-color: #7f39fb;
+            color: white;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+        }
+        .play-button-card:hover {
+            opacity: 1.0;
+            transform: scale(1.1);
+        }
         .song-row {
-            border-radius: 6px;
-            padding: 6px 12px;
+            border-radius: 8px;
+            padding: 8px 16px;
+            margin: 2px 8px;
+            transition: background-color 0.2s ease;
         }
         .song-row:hover {
-            background-color: alpha(@accent_bg_color, 0.08);
+            background-color: alpha(@accent_bg_color, 0.06);
         }
         .song-row:selected {
-            background-color: alpha(@accent_bg_color, 0.2);
+            background-color: alpha(@accent_bg_color, 0.15);
         }
         .equalizer-slider {
             min-height: 120px;
@@ -115,6 +164,17 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         .mini-player {
             background-color: @window_bg_color;
             border: 1px solid @borders;
+        }
+        .play-button-main {
+            background-color: @accent_bg_color;
+            color: @accent_fg_color;
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s ease;
+        }
+        .play-button-main:hover {
+            transform: scale(1.05);
+            background-color: alpha(@accent_bg_color, 0.9);
         }
         """
         css_provider.load_from_string(css)
@@ -127,9 +187,23 @@ class SoundwaveWindow(Adw.ApplicationWindow):
     def _build_sidebar(self) -> Gtk.Widget:
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         sidebar.set_size_request(220, -1)
+        sidebar.add_css_class("navigation-sidebar")
 
         header = Adw.HeaderBar()
         header.set_title_widget(Gtk.Label(label="Soundwave"))
+
+        settings_btn = Gtk.Button.new_from_icon_name("preferences-system-symbolic")
+        settings_btn.set_css_classes(["flat", "circular"])
+        settings_btn.set_tooltip_text("Ajustes")
+        settings_btn.connect("clicked", lambda b: self._on_show_settings())
+        header.pack_start(settings_btn)
+
+        collapse_btn = Gtk.Button.new_from_icon_name("sidebar-hide-symbolic")
+        collapse_btn.set_css_classes(["flat", "circular"])
+        collapse_btn.set_tooltip_text("Colapsar barra lateral")
+        collapse_btn.connect("clicked", lambda b: self._toggle_sidebar())
+        header.pack_end(collapse_btn)
+
         sidebar.append(header)
 
         scrolled = Gtk.ScrolledWindow()
@@ -142,16 +216,16 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         scrolled.set_child(self._sidebar_list)
 
         items = [
-            ("music-library-symbolic", "Todas las canciones", "all"),
-            ("album-symbolic", "Álbumes", "albums"),
-            ("artist-symbolic", "Artistas", "artists"),
-            ("genre-symbolic", "Géneros", "genres"),
+            ("audio-x-generic-symbolic", "Todas las canciones", "all"),
+            ("media-optical-symbolic", "Álbumes", "albums"),
+            ("avatar-default-symbolic", "Artistas", "artists"),
+            ("folder-music-symbolic", "Géneros", "genres"),
         ]
         for icon_name, label, view_id in items:
             row = Adw.ActionRow()
             row.set_title(label)
             icon = Gtk.Image.new_from_icon_name(icon_name)
-            icon.set_pixel_size(20)
+            icon.set_pixel_size(18)
             row.add_prefix(icon)
             row.set_css_classes(["sidebar-row"])
             row._view_id = view_id
@@ -179,10 +253,12 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             ("space", lambda: self._player_bar._on_play_pause()),
             ("<Control>Right", lambda: self.player.next()),
             ("<Control>Left", lambda: self.player.previous()),
-            ("<Control>f", lambda: self._search_bar.focus()),
-            ("Escape", lambda: self._search_bar.clear()),
+            ("<Control>f", lambda: self._library_view.search_entry.grab_focus()),
+            ("Escape", lambda: self._library_view.search_entry.set_text("")),
             ("<Control>m", lambda: self._on_toggle_mini()),
             ("<Control>e", lambda: self._on_show_equalizer()),
+            ("F11", lambda: self._toggle_fullscreen()),
+            ("<Control>b", lambda: self._toggle_sidebar()),
         ]
         for trigger_str, callback in shortcuts:
             trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)
@@ -229,17 +305,23 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             self._open_folder_picker()
 
     def _open_folder_picker(self):
-        def on_folder_selected(dialog, result):
-            try:
-                folder = dialog.select_folder_finish(result)
-                if folder:
-                    self._start_scan(Path(folder.get_path()))
-            except GLib.Error:
-                pass
+        dialog = Gtk.FileChooserNative.new(
+            title="Seleccionar carpeta de música",
+            parent=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+            accept_label="Seleccionar",
+            cancel_label="Cancelar"
+        )
 
-        dialog = Gtk.FolderDialog()
-        dialog.set_title("Seleccionar carpeta de música")
-        dialog.select_folder(parent=self, cancellable=None, callback=on_folder_selected)
+        def on_response(dialog, response_id):
+            if response_id == Gtk.ResponseType.ACCEPT:
+                file = dialog.get_file()
+                if file:
+                    self._start_scan(Path(file.get_path()))
+            dialog.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.show()
 
     def _start_scan(self, directory: Path):
         self._scan_dialog = Adw.AlertDialog(
@@ -302,7 +384,8 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._library_view.show_view(view_id)
 
     # --- Search ---
-    def _on_search(self, query: str):
+    def _on_search_changed(self, entry):
+        query = entry.get_text().strip()
         if query:
             results = self.db.search_songs(query)
             self._library_view.show_search_results(results)
@@ -342,9 +425,30 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self.set_visible(True)
         self.present()
 
+    # --- Fullscreen ---
+    def _toggle_fullscreen(self):
+        if self.is_fullscreen():
+            self.unfullscreen()
+        else:
+            self.fullscreen()
+
+    def _on_fullscreen_changed(self, *args):
+        self._player_bar.set_fullscreen_state(self.is_fullscreen())
+
+    # --- Sidebar toggle ---
+    def _toggle_sidebar(self):
+        shown = self._split_view.get_show_sidebar()
+        self._split_view.set_show_sidebar(not shown)
+        self._player_bar.set_sidebar_state(not shown)
+
     # --- Equalizer ---
     def _on_show_equalizer(self):
         dialog = EqualizerDialog(self.player, self)
+        dialog.present()
+
+    # --- Settings ---
+    def _on_show_settings(self):
+        dialog = SettingsDialog(self, self._lastfm)
         dialog.present()
 
     def set_lastfm(self, lastfm):

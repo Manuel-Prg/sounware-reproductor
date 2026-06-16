@@ -20,6 +20,8 @@ class PlayerBar(Gtk.Box):
         self._player = player
         self._toggle_mini_cbs: list[ToggleMiniCallback] = []
         self._show_eq_cbs: list[ShowEqualizerCallback] = []
+        self._toggle_fullscreen_cbs: list[Callable] = []
+        self._toggle_sidebar_cbs: list[Callable] = []
 
         self.set_css_classes(["player-bar"])
         self.set_size_request(-1, 72)
@@ -78,8 +80,8 @@ class PlayerBar(Gtk.Box):
         controls_box.append(self._prev_button)
 
         self._play_button = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
-        self._play_button.set_css_classes(["flat", "circular"])
-        self._play_button.set_size_request(40, 40)
+        self._play_button.set_css_classes(["play-button-main", "circular"])
+        self._play_button.set_size_request(44, 44)
         self._play_button.connect("clicked", lambda b: self._on_play_pause())
         self._play_button.set_tooltip_text("Reproducir/Pausar (Space)")
         controls_box.append(self._play_button)
@@ -141,7 +143,7 @@ class PlayerBar(Gtk.Box):
         right_box.append(self._shuffle_button)
 
         # Equalizer button
-        self._eq_button = Gtk.Button.new_from_icon_name("media-equalizer-symbolic")
+        self._eq_button = Gtk.Button.new_from_icon_name("preferences-desktop-sound-symbolic")
         self._eq_button.set_css_classes(["flat", "circular"])
         self._eq_button.set_tooltip_text("Ecualizador (Ctrl+E)")
         self._eq_button.connect("clicked", lambda b: self._emit_show_equalizer())
@@ -167,8 +169,22 @@ class PlayerBar(Gtk.Box):
 
         right_box.append(vol_box)
 
+        # Sidebar toggle button
+        self._sidebar_button = Gtk.Button.new_from_icon_name("sidebar-hide-symbolic")
+        self._sidebar_button.set_css_classes(["flat", "circular"])
+        self._sidebar_button.set_tooltip_text("Colapsar barra lateral")
+        self._sidebar_button.connect("clicked", lambda b: self._emit_toggle_sidebar())
+        right_box.append(self._sidebar_button)
+
+        # Fullscreen button
+        self._fullscreen_button = Gtk.Button.new_from_icon_name("view-fullscreen-symbolic")
+        self._fullscreen_button.set_css_classes(["flat", "circular"])
+        self._fullscreen_button.set_tooltip_text("Pantalla completa (F11)")
+        self._fullscreen_button.connect("clicked", lambda b: self._emit_toggle_fullscreen())
+        right_box.append(self._fullscreen_button)
+
         # Mini player button
-        self._mini_button = Gtk.Button.new_from_icon_name("window-minimize-symbolic")
+        self._mini_button = Gtk.Button.new_from_icon_name("view-compact-symbolic")
         self._mini_button.set_css_classes(["flat", "circular"])
         self._mini_button.set_tooltip_text("Mini reproductor (Ctrl+M)")
         self._mini_button.connect("clicked", lambda b: self._emit_toggle_mini())
@@ -285,6 +301,12 @@ class PlayerBar(Gtk.Box):
     def connect_show_equalizer(self, cb: ShowEqualizerCallback):
         self._show_eq_cbs.append(cb)
 
+    def connect_toggle_fullscreen(self, cb: Callable):
+        self._toggle_fullscreen_cbs.append(cb)
+
+    def connect_toggle_sidebar(self, cb: Callable):
+        self._toggle_sidebar_cbs.append(cb)
+
     def _emit_toggle_mini(self):
         for cb in self._toggle_mini_cbs:
             cb()
@@ -292,6 +314,30 @@ class PlayerBar(Gtk.Box):
     def _emit_show_equalizer(self):
         for cb in self._show_eq_cbs:
             cb()
+
+    def _emit_toggle_fullscreen(self):
+        for cb in self._toggle_fullscreen_cbs:
+            cb()
+
+    def _emit_toggle_sidebar(self):
+        for cb in self._toggle_sidebar_cbs:
+            cb()
+
+    def set_fullscreen_state(self, fullscreen: bool):
+        if fullscreen:
+            self._fullscreen_button.set_icon_name("view-restore-symbolic")
+            self._fullscreen_button.set_tooltip_text("Salir de pantalla completa (F11)")
+        else:
+            self._fullscreen_button.set_icon_name("view-fullscreen-symbolic")
+            self._fullscreen_button.set_tooltip_text("Pantalla completa (F11)")
+
+    def set_sidebar_state(self, shown: bool):
+        if shown:
+            self._sidebar_button.set_icon_name("sidebar-hide-symbolic")
+            self._sidebar_button.set_tooltip_text("Colapsar barra lateral")
+        else:
+            self._sidebar_button.set_icon_name("sidebar-show-symbolic")
+            self._sidebar_button.set_tooltip_text("Mostrar barra lateral")
 
     def add_toast(self, toast: Adw.Toast):
         pass

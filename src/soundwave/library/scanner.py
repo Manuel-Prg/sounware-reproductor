@@ -64,11 +64,6 @@ class MusicScanner:
     def scan_single_file(self, filepath: Path) -> Optional[Song]:
         if not is_music_file(filepath):
             return None
-        existing = self.db.get_song_by_path(str(filepath.resolve()))
-        if existing:
-            stat = filepath.stat()
-            if stat.st_mtime <= existing.modified_at:
-                return existing
         song = read_metadata(str(filepath))
         if song is None:
             return None
@@ -103,16 +98,16 @@ class MusicScanner:
         return files
 
     def _process_file(self, filepath: Path) -> str:
+        local_db = None
         try:
-            existing = self.db.get_song_by_path(str(filepath.resolve()))
-            if existing:
-                stat = filepath.stat()
-                if stat.st_mtime <= existing.modified_at:
-                    return "skipped"
+            local_db = Database(self.db.db_path)
             song = read_metadata(str(filepath))
             if song is None:
                 return "skipped"
-            self.db.add_song(song)
+            local_db.add_song(song)
             return "added"
         except Exception:
             return "skipped"
+        finally:
+            if local_db:
+                local_db.close()

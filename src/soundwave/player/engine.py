@@ -257,19 +257,11 @@ class Player:
             self._pipeline = None
             self._equalizer = None
 
-        pipeline_str = (
-            "playbin3 name=playbin"
-        )
-        self._pipeline = Gst.parse_launch(pipeline_str)
-        self._playbin = self._pipeline.get_by_name("playbin")
-
+        self._playbin = Gst.ElementFactory.make("playbin3", "playbin")
         if self._playbin is None:
-            pipeline_str = (
-                "playbin name=playbin"
-            )
-            self._pipeline = Gst.parse_launch(pipeline_str)
-            self._playbin = self._pipeline.get_by_name("playbin")
+            self._playbin = Gst.ElementFactory.make("playbin", "playbin")
 
+        self._pipeline = self._playbin
         self._playbin.set_property("volume", self._volume)
 
         bus = self._pipeline.get_bus()
@@ -277,26 +269,22 @@ class Player:
         bus.connect("message", self._on_bus_message)
 
     def _build_equalizer_pipeline(self):
-        pipeline_str = (
-            "playbin3 name=playbin uri= "
-            "audio-filter=\"equalizer-10bands name=equalizer\""
-        )
-        self._pipeline = Gst.parse_launch(pipeline_str)
-        self._playbin = self._pipeline.get_by_name("playbin")
-        self._equalizer = self._pipeline.get_by_name("equalizer")
+        if self._playbin:
+            self._playbin.set_state(Gst.State.NULL)
+            self._playbin = None
+            self._pipeline = None
+            self._equalizer = None
 
-        if self._equalizer is None:
-            pipeline_str = (
-                "playbin name=playbin uri= "
-                "audio-filter=\"equalizer-10bands name=equalizer\""
-            )
-            self._pipeline = Gst.parse_launch(pipeline_str)
-            self._playbin = self._pipeline.get_by_name("playbin")
-            self._equalizer = self._pipeline.get_by_name("equalizer")
+        self._playbin = Gst.ElementFactory.make("playbin3", "playbin")
+        if self._playbin is None:
+            self._playbin = Gst.ElementFactory.make("playbin", "playbin")
 
+        self._equalizer = Gst.ElementFactory.make("equalizer-10bands", "equalizer")
         if self._equalizer:
+            self._playbin.set_property("audio-filter", self._equalizer)
             self.set_equalizer_bands(self._equalizer_bands)
 
+        self._pipeline = self._playbin
         self._playbin.set_property("volume", self._volume)
 
         bus = self._pipeline.get_bus()

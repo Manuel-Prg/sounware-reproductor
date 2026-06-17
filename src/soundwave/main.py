@@ -79,7 +79,7 @@ class SoundwaveApp(Adw.Application):
             self._player.destroy()
         if self._db:
             self._db.close()
-        super().do_shutdown()
+        Gio.Application.do_shutdown(self)
 
 
 def main():

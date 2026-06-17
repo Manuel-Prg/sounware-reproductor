@@ -23,7 +23,6 @@ class MprisService(dbus.service.Object):
         self._bus = dbus.SessionBus()
 
         bus_name = dbus.service.BusName(MPRIS_BUS_NAME, bus=self._bus)
-        bus_name.request_name()
 
         super().__init__(bus_name, MPRIS_PLAYER_PATH)
 

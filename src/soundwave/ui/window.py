@@ -28,6 +28,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._scanner_cancellable: Optional[Gio.Cancellable] = None
         self._current_queue: list[Song] = []
         self._current_queue_source: str = "all"
+        self._lastfm = None
 
         self.set_title("Soundwave")
         self.set_default_size(1100, 720)
@@ -86,20 +87,13 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         @define-color accent_color #7f39fb;
         @define-color accent_fg_color #ffffff;
 
-        @media (prefers-color-scheme: dark) {
-            @define-color window_bg_color #121212;
-            @define-color card_bg_color #1e1e1e;
-            .navigation-sidebar {
-                background-color: #1a1a1a;
-            }
+        .navigation-sidebar {
+            background-color: @view_bg_color;
+            border-right: 1px solid @borders;
         }
-        @media (prefers-color-scheme: light) {
-            @define-color window_bg_color #f6f6f6;
-            @define-color card_bg_color #ffffff;
-            .navigation-sidebar {
-                background-color: #ffffff;
-                border-right: 1px solid alpha(black, 0.08);
-            }
+        .dark .navigation-sidebar {
+            background-color: #1a1a1a;
+            border-right: none;
         }
 
         .sidebar-row {
@@ -117,31 +111,94 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             padding: 10px 16px;
         }
         .album-cover {
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            border-radius: 0;
+            box-shadow: none;
+            transition: opacity 0.2s ease;
         }
         .album-grid {
             margin: 12px;
         }
+        .album-grid flowboxchild {
+            padding: 0;
+            margin: 0;
+        }
         .album-card {
-            padding: 10px;
-            border-radius: 12px;
-            background-color: @card_bg_color;
-            transition: all 0.2s ease;
+            padding: 0;
+            border-radius: 0;
+            background-color: transparent;
         }
-        .album-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        .album-card:hover .album-cover {
+            opacity: 0.8;
         }
-        .play-button-card {
+        .album-banner {
+            background-color: rgba(0, 0, 0, 0.75);
+            padding: 8px 6px;
+            transition: background-color 0.2s ease;
+        }
+        .album-card:hover .album-banner {
+            background-color: rgba(0, 0, 0, 0.9);
+        }
+        .album-banner-title {
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .album-banner-artist {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+        }
+        .album-play-btn {
             background-color: #7f39fb;
             color: white;
-            opacity: 0.8;
+            border-radius: 99px;
+            border: none;
+            opacity: 0.0;
+            transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+        .album-card:hover .album-play-btn {
+            opacity: 1.0;
+        }
+        .album-play-btn:hover {
+            background-color: #9254fd;
+            transform: scale(1.1);
+        }
+        .album-cover-placeholder {
+            background: linear-gradient(135deg, #3a3a3a 0%, #1a1a1a 100%);
+            border-radius: 0;
+            min-width: 160px;
+            min-height: 160px;
+        }
+        .album-cover-placeholder image {
+            color: alpha(white, 0.4);
+        }
+        .genre-card {
+            padding: 16px;
+            border-radius: 12px;
+            background-color: @card_bg_color;
+            border: 1px solid alpha(@borders, 0.5);
             transition: all 0.2s ease;
         }
-        .play-button-card:hover {
-            opacity: 1.0;
-            transform: scale(1.1);
+        .genre-card:hover {
+            transform: translateY(-4px);
+            background-color: alpha(@accent_bg_color, 0.08);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+            border-color: alpha(@accent_bg_color, 0.3);
+        }
+        .genre-icon-box {
+            background-color: alpha(@accent_bg_color, 0.1);
+            color: @accent_bg_color;
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .genre-name {
+            font-weight: bold;
+            font-size: 15px;
+            margin-top: 4px;
+        }
+        .genre-count {
+            font-size: 12px;
+            color: alpha(@window_fg_color, 0.6);
         }
         .song-row {
             border-radius: 8px;
@@ -223,6 +280,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         ]
         for icon_name, label, view_id in items:
             row = Adw.ActionRow()
+            row.set_activatable(True)
             row.set_title(label)
             icon = Gtk.Image.new_from_icon_name(icon_name)
             icon.set_pixel_size(18)
@@ -272,6 +330,8 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         stats = self.db.get_stats()
         if stats["total_songs"] == 0:
             self._show_welcome_dialog()
+        else:
+            self._refresh_library()
 
     def _show_welcome_dialog(self):
         dialog = Adw.AlertDialog(
@@ -305,23 +365,38 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             self._open_folder_picker()
 
     def _open_folder_picker(self):
-        dialog = Gtk.FileChooserNative.new(
-            title="Seleccionar carpeta de música",
-            parent=self,
-            action=Gtk.FileChooserAction.SELECT_FOLDER,
-            accept_label="Seleccionar",
-            cancel_label="Cancelar"
-        )
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog.new()
+            dialog.set_title("Seleccionar carpeta de música")
 
-        def on_response(dialog, response_id):
-            if response_id == Gtk.ResponseType.ACCEPT:
-                file = dialog.get_file()
-                if file:
-                    self._start_scan(Path(file.get_path()))
-            dialog.destroy()
+            def on_folder_selected(dialog, result, *args):
+                try:
+                    file = dialog.select_folder_finish(result)
+                    if file:
+                        self._start_scan(Path(file.get_path()))
+                except GLib.Error as e:
+                    print("Selección de carpeta cancelada o fallida:", e)
 
-        dialog.connect("response", on_response)
-        dialog.show()
+            dialog.select_folder(self, None, on_folder_selected)
+        else:
+            dialog = Gtk.FileChooserNative.new(
+                title="Seleccionar carpeta de música",
+                parent=self,
+                action=Gtk.FileChooserAction.SELECT_FOLDER,
+                accept_label="Seleccionar",
+                cancel_label="Cancelar"
+            )
+            self._file_chooser = dialog
+
+            def on_response(dialog, response_id):
+                if response_id == Gtk.ResponseType.ACCEPT:
+                    file = dialog.get_file()
+                    if file:
+                        self._start_scan(Path(file.get_path()))
+                self._file_chooser = None
+
+            dialog.connect("response", on_response)
+            dialog.show()
 
     def _start_scan(self, directory: Path):
         self._scan_dialog = Adw.AlertDialog(

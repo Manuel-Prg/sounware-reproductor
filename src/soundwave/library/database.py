@@ -141,8 +141,9 @@ class Database:
             int(song.has_embedded_art), song.art_mime,
             song.file_size, song.modified_at, song.added_at
         ))
+        row = cur.fetchone()
         self.conn.commit()
-        return cur.fetchone()[0]
+        return row[0]
 
     def remove_song(self, song_id: int):
         self.conn.execute("DELETE FROM songs WHERE id = ?", (song_id,))
@@ -175,38 +176,66 @@ class Database:
 
     def get_albums(self) -> list[dict]:
         rows = self.conn.execute("""
-            SELECT album, album_artist,
-                   COUNT(*) as song_count,
-                   SUM(duration) as total_duration,
-                   MAX(has_embedded_art) as has_art
-            FROM songs WHERE album != ''
-            GROUP BY album, album_artist
+            SELECT 
+                CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END as album,
+                CASE WHEN album_artist = '' OR album_artist IS NULL THEN 'Artista desconocido' ELSE album_artist END as album_artist,
+                COUNT(*) as song_count,
+                SUM(duration) as total_duration,
+                MAX(has_embedded_art) as has_art
+            FROM songs
+            GROUP BY 
+                CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END,
+                CASE WHEN album_artist = '' OR album_artist IS NULL THEN 'Artista desconocido' ELSE album_artist END
             ORDER BY album_artist, album
         """).fetchall()
         return [dict(r) for r in rows]
 
     def get_artists(self) -> list[dict]:
         rows = self.conn.execute("""
-            SELECT artist, COUNT(*) as song_count,
-                   COUNT(DISTINCT album) as album_count
-            FROM songs WHERE artist != ''
-            GROUP BY artist
+            SELECT 
+                CASE WHEN artist = '' OR artist IS NULL THEN 'Artista desconocido' ELSE artist END as artist,
+                COUNT(*) as song_count,
+                COUNT(DISTINCT CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END) as album_count
+            FROM songs
+            GROUP BY 
+                CASE WHEN artist = '' OR artist IS NULL THEN 'Artista desconocido' ELSE artist END
             ORDER BY artist
         """).fetchall()
         return [dict(r) for r in rows]
 
     def get_songs_by_album(self, album: str, album_artist: str = "") -> list[Song]:
-        rows = self.conn.execute("""
-            SELECT * FROM songs WHERE album = ? AND album_artist = ?
-            ORDER BY disc_number, track_number
-        """, (album, album_artist)).fetchall()
+        db_album = "" if album == "Álbum desconocido" else album
+        db_artist = "" if album_artist in ("Artista desconocido", "Varios artistas", "") else album_artist
+        if db_album == "":
+            if db_artist == "":
+                rows = self.conn.execute("""
+                    SELECT * FROM songs WHERE (album = '' OR album IS NULL) AND (album_artist = '' OR album_artist IS NULL OR artist = '' OR artist IS NULL)
+                    ORDER BY disc_number, track_number
+                """).fetchall()
+            else:
+                rows = self.conn.execute("""
+                    SELECT * FROM songs WHERE (album = '' OR album IS NULL) AND album_artist = ?
+                    ORDER BY disc_number, track_number
+                """, (db_artist,)).fetchall()
+        else:
+            rows = self.conn.execute("""
+                SELECT * FROM songs WHERE album = ? AND (album_artist = ? OR (? = '' AND (album_artist = '' OR album_artist IS NULL)))
+                ORDER BY disc_number, track_number
+            """, (db_album, db_artist, db_artist)).fetchall()
         return [self._row_to_song(r) for r in rows]
 
     def get_songs_by_artist(self, artist: str) -> list[Song]:
-        rows = self.conn.execute("""
-            SELECT * FROM songs WHERE artist = ?
-            ORDER BY album, disc_number, track_number
-        """, (artist,)).fetchall()
+        db_artist = "" if artist == "Artista desconocido" else artist
+        if db_artist == "":
+            rows = self.conn.execute("""
+                SELECT * FROM songs WHERE artist = '' OR artist IS NULL
+                ORDER BY album, disc_number, track_number
+            """).fetchall()
+        else:
+            rows = self.conn.execute("""
+                SELECT * FROM songs WHERE artist = ?
+                ORDER BY album, disc_number, track_number
+            """, (db_artist,)).fetchall()
         return [self._row_to_song(r) for r in rows]
 
     def update_play_count(self, song_id: int):

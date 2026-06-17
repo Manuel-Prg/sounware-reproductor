@@ -75,33 +75,33 @@ def read_metadata(filepath: str) -> Optional[Song]:
         if song.has_embedded_art:
             song.art_mime = pics[0].mime
 
-    title = _get_tag(tags, "title")
+    title = _get_tag(mfile, "title")
     if title:
         song.title = title
-    artist = _get_tag(tags, "artist")
+    artist = _get_tag(mfile, "artist")
     if artist:
         song.artist = artist
-    album = _get_tag(tags, "album")
+    album = _get_tag(mfile, "album")
     if album:
         song.album = album
-    album_artist = _get_tag(tags, "albumartist", "album_artist")
+    album_artist = _get_tag(mfile, "albumartist", "album_artist")
     if album_artist:
         song.album_artist = album_artist
 
-    track_str = _get_tag(tags, "tracknumber", "track")
+    track_str = _get_tag(mfile, "tracknumber", "track")
     song.track_number = _parse_track_number(track_str)
 
-    disc_str = _get_tag(tags, "discnumber", "disc")
+    disc_str = _get_tag(mfile, "discnumber", "disc")
     song.disc_number = _parse_int(disc_str, 1)
 
-    genre = _get_tag(tags, "genre")
+    genre = _get_tag(mfile, "genre")
     if genre:
         song.genre = genre
 
-    year_str = _get_tag(tags, "date", "year", "originaldate", "originalyear")
+    year_str = _get_tag(mfile, "date", "year", "originaldate", "originalyear")
     song.year = _parse_int(year_str, 0)
 
-    composer = _get_tag(tags, "composer")
+    composer = _get_tag(mfile, "composer")
     if composer:
         song.composer = composer
 
@@ -190,16 +190,94 @@ def _mp4_covr_mime(covr_data) -> str:
     return "image/jpeg"
 
 
-def _get_tag(tags, *names):
+def _get_tag(mfile, *names):
+    tags = mfile.tags or {}
+    
+    # MP3 (ID3 tags)
+    if isinstance(mfile, MP3):
+        # Map logical names to ID3 frame IDs
+        id3_map = {
+            "title": ["TIT2"],
+            "artist": ["TPE1"],
+            "album": ["TALB"],
+            "albumartist": ["TPE2"],
+            "album_artist": ["TPE2"],
+            "tracknumber": ["TRCK"],
+            "track": ["TRCK"],
+            "discnumber": ["TPOS"],
+            "disc": ["TPOS"],
+            "genre": ["TCON"],
+            "date": ["TDRC", "TYER"],
+            "year": ["TDRC", "TYER"],
+            "originaldate": ["TDOR"],
+            "originalyear": ["TDOR"],
+            "composer": ["TCOM"]
+        }
+        for name in names:
+            frames = id3_map.get(name, [])
+            for frame in frames:
+                if frame in tags:
+                    val = tags[frame]
+                    if hasattr(val, "text") and val.text:
+                        return str(val.text[0]).strip()
+                    elif isinstance(val, list) and val:
+                        return str(val[0]).strip()
+                    elif val:
+                        return str(val).strip()
+        return ""
+
+    # MP4 / M4A (iTunes tags)
+    elif isinstance(mfile, MP4):
+        mp4_map = {
+            "title": ["\xa9nam"],
+            "artist": ["\xa9ART"],
+            "album": ["\xa9alb"],
+            "albumartist": ["aART"],
+            "album_artist": ["aART"],
+            "tracknumber": ["trkn"],
+            "track": ["trkn"],
+            "discnumber": ["disk"],
+            "disc": ["disk"],
+            "genre": ["\xa9gen", "gnre"],
+            "date": ["\xa9day"],
+            "year": ["\xa9day"],
+            "composer": ["\xa9wrt"]
+        }
+        for name in names:
+            keys = mp4_map.get(name, [])
+            for key in keys:
+                if key in tags:
+                    val = tags[key]
+                    if isinstance(val, list) and val:
+                        if key in ("trkn", "disk"):
+                            val_first = val[0]
+                            if isinstance(val_first, (tuple, list)) and val_first:
+                                return str(val_first[0]).strip()
+                            return str(val_first).strip()
+                        return str(val[0]).strip()
+                    elif val:
+                        return str(val).strip()
+        return ""
+
+    # VorbisComments / standard case-insensitive
+    # FLAC, OggVorbis, OggOpus, etc.
     for name in names:
-        raw = tags.get(name)
-        if raw is None:
-            continue
-        if isinstance(raw, list):
-            if raw and raw[0]:
-                return str(raw[0])
-        elif raw:
-            return str(raw)
+        for key in (name, name.upper(), name.lower()):
+            if key in tags:
+                val = tags[key]
+                if isinstance(val, list) and val:
+                    return str(val[0]).strip()
+                elif val:
+                    return str(val).strip()
+
+    # Fallback to direct key matching
+    for name in names:
+        val = tags.get(name)
+        if val is not None:
+            if isinstance(val, list) and val:
+                return str(val[0]).strip()
+            return str(val).strip()
+
     return ""
 
 

@@ -64,6 +64,7 @@ class LibraryView(Gtk.Box):
     def _build_albums_view(self):
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self._albums_flow = Gtk.FlowBox()
         self._albums_flow.set_max_children_per_line(6)
@@ -71,9 +72,10 @@ class LibraryView(Gtk.Box):
         self._albums_flow.set_selection_mode(Gtk.SelectionMode.NONE)
         self._albums_flow.set_css_classes(["album-grid"])
         self._albums_flow.set_homogeneous(True)
-        self._albums_flow.set_column_spacing(12)
-        self._albums_flow.set_row_spacing(12)
+        self._albums_flow.set_column_spacing(0)
+        self._albums_flow.set_row_spacing(0)
         self._albums_flow.set_halign(Gtk.Align.FILL)
+        self._albums_flow.set_valign(Gtk.Align.START)
         scrolled.set_child(self._albums_flow)
         self._stack.add_named(scrolled, "albums")
 
@@ -97,9 +99,10 @@ class LibraryView(Gtk.Box):
         self._genres_flow.set_min_children_per_line(3)
         self._genres_flow.set_selection_mode(Gtk.SelectionMode.NONE)
         self._genres_flow.set_homogeneous(True)
-        self._genres_flow.set_column_spacing(8)
-        self._genres_flow.set_row_spacing(8)
+        self._genres_flow.set_column_spacing(12)
+        self._genres_flow.set_row_spacing(12)
         self._genres_flow.set_halign(Gtk.Align.FILL)
+        self._genres_flow.set_valign(Gtk.Align.START)
         scrolled.set_child(self._genres_flow)
         self._stack.add_named(scrolled, "genres")
 
@@ -195,6 +198,7 @@ class LibraryView(Gtk.Box):
         artists = self.db.get_artists()
         for artist in artists:
             row = Adw.ActionRow()
+            row.set_activatable(True)
             row.set_title(artist["artist"])
             row.set_subtitle(f"{artist['album_count']} álbumes · {artist['song_count']} canciones")
             row._artist_name = artist["artist"]
@@ -208,21 +212,23 @@ class LibraryView(Gtk.Box):
             else:
                 break
 
-        genres = self.db.conn.execute(
-            "SELECT genre, COUNT(*) as count FROM songs WHERE genre != '' GROUP BY genre ORDER BY genre"
-        ).fetchall()
+        genres = self.db.conn.execute("""
+            SELECT 
+                CASE WHEN genre = '' OR genre IS NULL THEN 'Sin género' ELSE genre END as genre,
+                COUNT(*) as count 
+            FROM songs 
+            GROUP BY 
+                CASE WHEN genre = '' OR genre IS NULL THEN 'Sin género' ELSE genre END 
+            ORDER BY genre
+        """).fetchall()
         for g in genres:
-            btn = Gtk.Button(label=f"{g['genre']}\n{g['count']} canciones")
-            btn.set_css_classes(["genre-button"])
-            btn.set_halign(Gtk.Align.FILL)
-            btn.set_size_request(120, 80)
-            btn._genre = g["genre"]
-            btn.connect("clicked", self._on_genre_clicked)
-            self._genres_flow.append(btn)
+            card = self._build_genre_card(g)
+            self._genres_flow.append(card)
 
     # --- Widget builders ---
     def _build_song_row(self, song: Song) -> Adw.ActionRow:
         row = Adw.ActionRow()
+        row.set_activatable(True)
         row.set_title(song.display_title)
         row.set_subtitle(f"{song.display_artist} · {song.display_album}")
         if song.duration:
@@ -233,15 +239,15 @@ class LibraryView(Gtk.Box):
         return row
 
     def _build_album_card(self, album: dict) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_size_request(160, 220)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_size_request(160, -1)
         box.add_css_class("album-card")
 
-        # Overlay for cover art + play button
+        aspect = Gtk.AspectFrame(xalign=0.5, yalign=0.5, ratio=1.0, obey_child=False)
+
         overlay = Gtk.Overlay()
 
         picture = Gtk.Picture()
-        picture.set_size_request(160, 160)
         picture.set_content_fit(Gtk.ContentFit.COVER)
         picture.set_css_classes(["album-cover"])
 
@@ -256,46 +262,98 @@ class LibraryView(Gtk.Box):
                 art_found = True
                 break
 
-        if not art_found:
-            picture.set_paintable(None)
+        if art_found:
+            overlay.set_child(picture)
+        else:
+            placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            placeholder.add_css_class("album-cover-placeholder")
+            
+            icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
+            icon.set_pixel_size(48)
+            icon.set_halign(Gtk.Align.CENTER)
+            icon.set_valign(Gtk.Align.CENTER)
+            icon.set_hexpand(True)
+            icon.set_vexpand(True)
+            placeholder.append(icon)
+            overlay.set_child(placeholder)
 
-        overlay.set_child(picture)
+        # Text Banner at the bottom
+        banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        banner.add_css_class("album-banner")
+        banner.set_valign(Gtk.Align.END)
+        banner.set_halign(Gtk.Align.FILL)
 
-        # Floating Play Button
+        title = Gtk.Label(label=album["album"])
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        title.set_max_width_chars(16)
+        title.set_xalign(0.5)
+        title.add_css_class("album-banner-title")
+        banner.append(title)
+
+        artist_name = album.get("album_artist", "") or "Artista desconocido"
+        artist = Gtk.Label(label=artist_name)
+        artist.set_ellipsize(Pango.EllipsizeMode.END)
+        artist.set_max_width_chars(18)
+        artist.set_xalign(0.5)
+        artist.add_css_class("album-banner-artist")
+        banner.append(artist)
+
+        overlay.add_overlay(banner)
+
+        # Floating Play Button in the center (visible on hover)
         play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
-        play_btn.set_css_classes(["play-button-card", "circular"])
-        play_btn.set_halign(Gtk.Align.END)
-        play_btn.set_valign(Gtk.Align.END)
-        play_btn.set_margin_end(8)
-        play_btn.set_margin_bottom(8)
-        play_btn.set_size_request(36, 36)
+        play_btn.set_css_classes(["album-play-btn", "circular"])
+        play_btn.set_halign(Gtk.Align.CENTER)
+        play_btn.set_valign(Gtk.Align.CENTER)
+        play_btn.set_size_request(44, 44)
         play_btn.connect("clicked", lambda b, a=album: self._on_album_clicked(a))
         overlay.add_overlay(play_btn)
 
-        box.append(overlay)
+        aspect.set_child(overlay)
+        box.append(aspect)
 
-        # Title
-        title = Gtk.Label(label=album["album"])
-        title.set_ellipsize(Pango.EllipsizeMode.END)
-        title.set_max_width_chars(18)
-        title.set_xalign(0)
-        title.add_css_class("heading")
-        box.append(title)
-
-        # Subtitle
-        subtitle = Gtk.Label(label=album.get("album_artist", "") or "Varios artistas")
-        subtitle.set_ellipsize(Pango.EllipsizeMode.END)
-        subtitle.set_max_width_chars(18)
-        subtitle.set_xalign(0)
-        subtitle.add_css_class("caption")
-        box.append(subtitle)
-
-        # Click handler - play album (double click or general card click)
+        # Click handler - play album
         gesture = Gtk.GestureClick()
         gesture.connect("pressed", lambda g, n, x, y, a=album: self._on_album_clicked(a))
         box.add_controller(gesture)
 
         return box
+
+    def _build_genre_card(self, g: dict) -> Gtk.Box:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.set_size_request(140, -1)
+        card.add_css_class("genre-card")
+
+        # Icon box
+        icon_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        icon_box.set_halign(Gtk.Align.START)
+        icon_box.add_css_class("genre-icon-box")
+        
+        icon = Gtk.Image.new_from_icon_name("folder-music-symbolic")
+        icon.set_pixel_size(24)
+        icon_box.append(icon)
+        card.append(icon_box)
+
+        # Genre Name
+        name_label = Gtk.Label(label=g["genre"])
+        name_label.set_ellipsize(Pango.EllipsizeMode.END)
+        name_label.set_max_width_chars(16)
+        name_label.set_xalign(0)
+        name_label.add_css_class("genre-name")
+        card.append(name_label)
+
+        # Song Count
+        count_label = Gtk.Label(label=f"{g['count']} canciones")
+        count_label.set_xalign(0)
+        count_label.add_css_class("genre-count")
+        card.append(count_label)
+
+        # Click handler
+        gesture = Gtk.GestureClick()
+        gesture.connect("pressed", lambda gesture, n_press, x, y, name=g["genre"]: self._on_genre_selected(name))
+        card.add_controller(gesture)
+
+        return card
 
     # --- Event handlers ---
     def _on_song_activated(self, listbox, row):
@@ -339,9 +397,11 @@ class LibraryView(Gtk.Box):
             self._stack.set_visible_child_name("songs")
             self._all_songs = songs
 
-    def _on_genre_clicked(self, button):
-        genre = getattr(button, "_genre", "")
-        songs = self.db.search_songs(genre)
+    def _on_genre_selected(self, genre: str):
+        if genre == "Sin género":
+            songs = [s for s in self.db.get_all_songs() if not s.genre or s.genre.strip() == ""]
+        else:
+            songs = self.db.search_songs(genre)
         if songs:
             self._title_label.set_label(f"Género: {genre}")
             while True:

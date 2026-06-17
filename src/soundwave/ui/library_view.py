@@ -72,8 +72,8 @@ class LibraryView(Gtk.Box):
         self._albums_flow.set_selection_mode(Gtk.SelectionMode.NONE)
         self._albums_flow.set_css_classes(["album-grid"])
         self._albums_flow.set_homogeneous(True)
-        self._albums_flow.set_column_spacing(0)
-        self._albums_flow.set_row_spacing(0)
+        self._albums_flow.set_column_spacing(16)
+        self._albums_flow.set_row_spacing(16)
         self._albums_flow.set_halign(Gtk.Align.FILL)
         self._albums_flow.set_valign(Gtk.Align.START)
         scrolled.set_child(self._albums_flow)
@@ -82,12 +82,19 @@ class LibraryView(Gtk.Box):
     def _build_artists_view(self):
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
-        self._artists_list = Gtk.ListBox()
-        self._artists_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._artists_list.set_css_classes(["artists-list"])
-        self._artists_list.connect("row-activated", self._on_artist_activated)
-        scrolled.set_child(self._artists_list)
+        self._artists_flow = Gtk.FlowBox()
+        self._artists_flow.set_max_children_per_line(6)
+        self._artists_flow.set_min_children_per_line(2)
+        self._artists_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._artists_flow.set_css_classes(["artist-grid"])
+        self._artists_flow.set_homogeneous(True)
+        self._artists_flow.set_column_spacing(16)
+        self._artists_flow.set_row_spacing(16)
+        self._artists_flow.set_halign(Gtk.Align.FILL)
+        self._artists_flow.set_valign(Gtk.Align.START)
+        scrolled.set_child(self._artists_flow)
         self._stack.add_named(scrolled, "artists")
 
     def _build_genres_view(self):
@@ -189,20 +196,16 @@ class LibraryView(Gtk.Box):
 
     def _populate_artists(self):
         while True:
-            child = self._artists_list.get_first_child()
+            child = self._artists_flow.get_first_child()
             if child:
-                self._artists_list.remove(child)
+                self._artists_flow.remove(child)
             else:
                 break
 
         artists = self.db.get_artists()
         for artist in artists:
-            row = Adw.ActionRow()
-            row.set_activatable(True)
-            row.set_title(artist["artist"])
-            row.set_subtitle(f"{artist['album_count']} álbumes · {artist['song_count']} canciones")
-            row._artist_name = artist["artist"]
-            self._artists_list.append(row)
+            card = self._build_artist_card(artist)
+            self._artists_flow.append(card)
 
     def _populate_genres(self):
         while True:
@@ -239,66 +242,27 @@ class LibraryView(Gtk.Box):
         return row
 
     def _build_album_card(self, album: dict) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.set_size_request(160, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_size_request(140, -1)
         box.add_css_class("album-card")
-
-        aspect = Gtk.AspectFrame(xalign=0.5, yalign=0.5, ratio=1.0, obey_child=False)
 
         overlay = Gtk.Overlay()
 
-        picture = Gtk.Picture()
-        picture.set_content_fit(Gtk.ContentFit.COVER)
-        picture.set_css_classes(["album-cover"])
-
         # Try to find art for this album
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
-        art_found = False
+        art_texture = None
         for s in songs:
             art_path = get_art_path(s.id, self.db)
             if art_path and art_path.exists():
-                texture = Gdk.Texture.new_from_filename(str(art_path))
-                picture.set_paintable(texture)
-                art_found = True
+                art_texture = Gdk.Texture.new_from_filename(str(art_path))
                 break
 
-        if art_found:
-            overlay.set_child(picture)
-        else:
-            placeholder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            placeholder.add_css_class("album-cover-placeholder")
-            
-            icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
-            icon.set_pixel_size(48)
-            icon.set_halign(Gtk.Align.CENTER)
-            icon.set_valign(Gtk.Align.CENTER)
-            icon.set_hexpand(True)
-            icon.set_vexpand(True)
-            placeholder.append(icon)
-            overlay.set_child(placeholder)
+        avatar = Adw.Avatar(size=120, text=album["album"], show_initials=True)
+        if art_texture:
+            avatar.set_custom_image(art_texture)
 
-        # Text Banner at the bottom
-        banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        banner.add_css_class("album-banner")
-        banner.set_valign(Gtk.Align.END)
-        banner.set_halign(Gtk.Align.FILL)
-
-        title = Gtk.Label(label=album["album"])
-        title.set_ellipsize(Pango.EllipsizeMode.END)
-        title.set_max_width_chars(16)
-        title.set_xalign(0.5)
-        title.add_css_class("album-banner-title")
-        banner.append(title)
-
-        artist_name = album.get("album_artist", "") or "Artista desconocido"
-        artist = Gtk.Label(label=artist_name)
-        artist.set_ellipsize(Pango.EllipsizeMode.END)
-        artist.set_max_width_chars(18)
-        artist.set_xalign(0.5)
-        artist.add_css_class("album-banner-artist")
-        banner.append(artist)
-
-        overlay.add_overlay(banner)
+        avatar.set_halign(Gtk.Align.CENTER)
+        overlay.set_child(avatar)
 
         # Floating Play Button in the center (visible on hover)
         play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
@@ -309,8 +273,24 @@ class LibraryView(Gtk.Box):
         play_btn.connect("clicked", lambda b, a=album: self._on_album_clicked(a))
         overlay.add_overlay(play_btn)
 
-        aspect.set_child(overlay)
-        box.append(aspect)
+        box.append(overlay)
+
+        # Title
+        title = Gtk.Label(label=album["album"])
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        title.set_max_width_chars(16)
+        title.set_xalign(0.5)
+        title.add_css_class("album-card-title")
+        box.append(title)
+
+        # Subtitle (Artist)
+        artist_name = album.get("album_artist", "") or "Artista desconocido"
+        artist = Gtk.Label(label=artist_name)
+        artist.set_ellipsize(Pango.EllipsizeMode.END)
+        artist.set_max_width_chars(18)
+        artist.set_xalign(0.5)
+        artist.add_css_class("album-card-subtitle")
+        box.append(artist)
 
         # Click handler - play album
         gesture = Gtk.GestureClick()
@@ -318,6 +298,51 @@ class LibraryView(Gtk.Box):
         box.add_controller(gesture)
 
         return box
+
+    def _build_artist_card(self, artist: dict) -> Gtk.Box:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.set_size_request(140, -1)
+        card.add_css_class("artist-card")
+
+        # Let's find an album cover to use as the artist's avatar image
+        songs = self.db.get_songs_by_artist(artist["artist"])
+        art_texture = None
+        for s in songs:
+            art_path = get_art_path(s.id, self.db)
+            if art_path and art_path.exists():
+                art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                break
+
+        avatar = Adw.Avatar(size=120, text=artist["artist"], show_initials=True)
+        if art_texture:
+            avatar.set_custom_image(art_texture)
+
+        avatar.set_halign(Gtk.Align.CENTER)
+        card.append(avatar)
+
+        # Name
+        name = Gtk.Label(label=artist["artist"])
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        name.set_max_width_chars(16)
+        name.set_xalign(0.5)
+        name.add_css_class("artist-card-name")
+        card.append(name)
+
+        # Subtitle
+        subtitle_text = f"{artist['album_count']} álb. · {artist['song_count']} canc."
+        subtitle = Gtk.Label(label=subtitle_text)
+        subtitle.set_ellipsize(Pango.EllipsizeMode.END)
+        subtitle.set_max_width_chars(18)
+        subtitle.set_xalign(0.5)
+        subtitle.add_css_class("artist-card-subtitle")
+        card.append(subtitle)
+
+        # Click gesture to open artist's songs
+        gesture = Gtk.GestureClick()
+        gesture.connect("pressed", lambda g, n, x, y, name=artist["artist"]: self._on_artist_selected_name(name))
+        card.add_controller(gesture)
+
+        return card
 
     def _build_genre_card(self, g: dict) -> Gtk.Box:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -380,8 +405,7 @@ class LibraryView(Gtk.Box):
             for cb in self._play_song_cbs:
                 cb(songs[0], songs)
 
-    def _on_artist_activated(self, listbox, row):
-        artist_name = getattr(row, "_artist_name", "")
+    def _on_artist_selected_name(self, artist_name: str):
         songs = self.db.get_songs_by_artist(artist_name)
         if songs:
             self._title_label.set_label(artist_name)

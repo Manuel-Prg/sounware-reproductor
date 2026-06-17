@@ -110,41 +110,38 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             border-top: 1px solid @borders;
             padding: 10px 16px;
         }
-        .album-cover {
-            border-radius: 0;
-            box-shadow: none;
-            transition: opacity 0.2s ease;
+        .album-grid, .artist-grid {
+            margin: 16px;
         }
-        .album-grid {
-            margin: 12px;
+        .album-grid flowboxchild, .artist-grid flowboxchild {
+            padding: 8px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
         }
-        .album-grid flowboxchild {
-            padding: 0;
-            margin: 0;
+        .album-grid flowboxchild:hover, .artist-grid flowboxchild:hover {
+            background-color: alpha(white, 0.05);
         }
-        .album-card {
-            padding: 0;
-            border-radius: 0;
+        .album-card, .artist-card {
+            padding: 8px;
             background-color: transparent;
         }
-        .album-card:hover .album-cover {
-            opacity: 0.8;
+        .album-card avatar, .artist-card avatar {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border-radius: 9999px;
         }
-        .album-banner {
-            background-color: rgba(0, 0, 0, 0.75);
-            padding: 8px 6px;
-            transition: background-color 0.2s ease;
+        .album-card:hover avatar, .artist-card:hover avatar {
+            transform: scale(1.06);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
         }
-        .album-card:hover .album-banner {
-            background-color: rgba(0, 0, 0, 0.9);
-        }
-        .album-banner-title {
+        .album-card-title, .artist-card-name {
             color: #ffffff;
             font-weight: bold;
             font-size: 13px;
+            margin-top: 4px;
         }
-        .album-banner-artist {
-            color: rgba(255, 255, 255, 0.7);
+        .album-card-subtitle, .artist-card-subtitle {
+            color: rgba(255, 255, 255, 0.6);
             font-size: 11px;
         }
         .album-play-btn {
@@ -161,15 +158,6 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         .album-play-btn:hover {
             background-color: #9254fd;
             transform: scale(1.1);
-        }
-        .album-cover-placeholder {
-            background: linear-gradient(135deg, #3a3a3a 0%, #1a1a1a 100%);
-            border-radius: 0;
-            min-width: 160px;
-            min-height: 160px;
-        }
-        .album-cover-placeholder image {
-            color: alpha(white, 0.4);
         }
         .genre-card {
             padding: 16px;

@@ -242,9 +242,6 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         .volume-button {
             min-width: 32px;
         }
-        .mini-player {
-            background-color: @window_bg_color;
-        }
         .play-button-main {
             background-color: @accent_bg_color;
             color: #000000;

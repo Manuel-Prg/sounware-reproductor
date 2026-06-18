@@ -26,6 +26,7 @@ class LibraryView(Gtk.Box):
         self._all_songs: list[Song] = []
 
         self._header = Adw.HeaderBar()
+        self._header.add_css_class("green-deck-header")
         self._title_label = Gtk.Label(label="Todas las canciones")
         self._title_label.set_css_classes(["title"])
         self._header.set_title_widget(self._title_label)
@@ -270,7 +271,10 @@ class LibraryView(Gtk.Box):
         play_btn.set_halign(Gtk.Align.CENTER)
         play_btn.set_valign(Gtk.Align.CENTER)
         play_btn.set_size_request(44, 44)
-        play_btn.connect("clicked", lambda b, a=album: self._on_album_clicked(a))
+        album_songs = songs
+        play_btn.connect("clicked", lambda b, a=album, s=album_songs: (
+            s and [cb(s[0], s) for cb in self._play_song_cbs]
+        ))
         overlay.add_overlay(play_btn)
 
         box.append(overlay)
@@ -399,11 +403,27 @@ class LibraryView(Gtk.Box):
         for cb in self._play_song_cbs:
             cb(song, queue)
 
-    def _on_album_clicked(self, album: dict):
+    def _show_album_songs(self, album: dict):
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
-        if songs:
-            for cb in self._play_song_cbs:
-                cb(songs[0], songs)
+        if not songs:
+            return
+        album_name = album.get("album", "Álbum desconocido")
+        artist_name = album.get("album_artist", "") or songs[0].display_artist
+        self._title_label.set_label(f"{album_name}")
+        while True:
+            child = self._songs_list.get_first_child()
+            if child:
+                self._songs_list.remove(child)
+            else:
+                break
+        for s in songs:
+            r = self._build_song_row(s)
+            self._songs_list.append(r)
+        self._stack.set_visible_child_name("songs")
+        self._all_songs = songs
+
+    def _on_album_clicked(self, album: dict):
+        self._show_album_songs(album)
 
     def _on_artist_selected_name(self, artist_name: str):
         songs = self.db.get_songs_by_artist(artist_name)

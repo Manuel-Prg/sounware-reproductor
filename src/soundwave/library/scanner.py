@@ -68,6 +68,11 @@ class MusicScanner:
         if song is None:
             return None
         song.id = self.db.add_song(song)
+        try:
+            from soundwave.library.album_art import get_art_path
+            get_art_path(song.id, self.db)
+        except Exception as e:
+            print(f"Error pre-cacheando carátula para archivo único: {e}")
         return song
 
     def remove_missing_files(self) -> int:
@@ -104,7 +109,12 @@ class MusicScanner:
             song = read_metadata(str(filepath))
             if song is None:
                 return "skipped"
-            local_db.add_song(song)
+            song_id = local_db.add_song(song)
+            try:
+                from soundwave.library.album_art import get_art_path
+                get_art_path(song_id, local_db)
+            except Exception as e:
+                print(f"Error pre-cacheando carátula en lote: {e}")
             return "added"
         except Exception:
             return "skipped"

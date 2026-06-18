@@ -24,6 +24,7 @@ class EqualizerDialog(Adw.Window):
         self._labels: list[Gtk.Label] = []
 
         self._build_ui()
+        self._setup_initial_state()
 
     def _build_ui(self):
         toolbar_view = Adw.ToolbarView()
@@ -62,7 +63,7 @@ class EqualizerDialog(Adw.Window):
             band_box.set_size_request(50, -1)
 
             # Value label
-            value_label = Gtk.Label(label="0.0")
+            value_label = Gtk.Label(label=f"{self._bands[i]:+.1f}")
             value_label.set_css_classes(["caption"])
             band_box.append(value_label)
             self._labels.append(value_label)
@@ -128,3 +129,29 @@ class EqualizerDialog(Adw.Window):
             self._labels[i].set_label("0.0")
         self._player.set_equalizer_bands(self._bands)
         self._preset_dropdown.set_selected(-1)
+
+    def _setup_initial_state(self):
+        enabled = self._player.get_equalizer_enabled()
+        self._enable_switch.set_active(enabled)
+        self._enable_switch.connect("state-set", self._on_enable_toggled)
+
+        # Configurar sensitividad inicial de los controles
+        for slider in self._sliders:
+            slider.set_sensitive(enabled)
+        self._preset_dropdown.set_sensitive(enabled)
+
+        # Intentar seleccionar el preset correspondiente si coincide con las bandas actuales
+        presets = get_preset_names()
+        for idx, preset_name in enumerate(presets):
+            if list(get_preset(preset_name)) == self._bands:
+                # Desconectar temporalmente el manejador para evitar bucles si es necesario,
+                # pero ya que los valores coinciden, no cambiarán el estado audible.
+                self._preset_dropdown.set_selected(idx)
+                break
+
+    def _on_enable_toggled(self, switch, state):
+        self._player.set_equalizer_enabled(state)
+        for slider in self._sliders:
+            slider.set_sensitive(state)
+        self._preset_dropdown.set_sensitive(state)
+        return False

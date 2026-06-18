@@ -122,7 +122,7 @@ class MiniPlayer(Adw.Window):
         controls_box.append(self._prev_button)
 
         self._play_button = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
-        self._play_button.set_css_classes(["flat", "circular"])
+        self._play_button.set_css_classes(["green-deck-btn", "circular"])
         self._play_button.set_size_request(56, 56)
         self._play_button.connect("clicked", lambda b: self._player.play_pause())
         controls_box.append(self._play_button)

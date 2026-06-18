@@ -4,6 +4,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 
 from pathlib import Path
+from soundwave.library.config import save_setting, apply_theme
+from soundwave.library.smart_playlist import evaluate_rules
+from soundwave.library.database import Database
 
 class SettingsDialog(Adw.PreferencesWindow):
     def __init__(self, parent_window, lastfm):
@@ -34,9 +37,9 @@ class SettingsDialog(Adw.PreferencesWindow):
 
         style_manager = Adw.StyleManager.get_default()
         current_scheme = style_manager.get_color_scheme()
-        if current_scheme == Adw.ColorScheme.PREFER_LIGHT:
+        if current_scheme in (Adw.ColorScheme.PREFER_LIGHT, Adw.ColorScheme.FORCE_LIGHT):
             theme_row.set_selected(1)
-        elif current_scheme == Adw.ColorScheme.PREFER_DARK:
+        elif current_scheme in (Adw.ColorScheme.PREFER_DARK, Adw.ColorScheme.FORCE_DARK):
             theme_row.set_selected(2)
         else:
             theme_row.set_selected(0)
@@ -44,11 +47,14 @@ class SettingsDialog(Adw.PreferencesWindow):
         def on_theme_changed(row, pspec):
             selected = row.get_selected()
             if selected == 1:
-                style_manager.set_color_scheme(Adw.ColorScheme.PREFER_LIGHT)
+                apply_theme("light")
+                save_setting("theme", "light")
             elif selected == 2:
-                style_manager.set_color_scheme(Adw.ColorScheme.PREFER_DARK)
+                apply_theme("dark")
+                save_setting("theme", "dark")
             else:
-                style_manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
+                apply_theme("system")
+                save_setting("theme", "system")
 
         theme_row.connect("notify::selected", on_theme_changed)
         appearance_group.add(theme_row)
@@ -67,6 +73,41 @@ class SettingsDialog(Adw.PreferencesWindow):
         scan_btn.connect("clicked", self._on_scan_clicked)
         scan_row.add_suffix(scan_btn)
         library_group.add(scan_row)
+
+        # Group 3: Audio Settings
+        audio_group = Adw.PreferencesGroup()
+        audio_group.set_title("Audio")
+        audio_group.set_description("Configura opciones de reproducción de sonido")
+        general_page.add(audio_group)
+
+        replaygain_row = Adw.ComboRow()
+        replaygain_row.set_title("ReplayGain")
+        replaygain_row.set_subtitle("Normaliza el volumen automáticamente según los metadatos")
+        replaygain_model = Gtk.StringList.new(["Desactivado", "Por Pista (Track)", "Por Álbum (Album)"])
+        replaygain_row.set_model(replaygain_model)
+
+        # Cargar configuración actual de ReplayGain
+        from soundwave.library.config import load_settings
+        settings = load_settings()
+        current_rg = settings.get("replaygain_mode", "track")
+        if current_rg == "off":
+            replaygain_row.set_selected(0)
+        elif current_rg == "track":
+            replaygain_row.set_selected(1)
+        elif current_rg == "album":
+            replaygain_row.set_selected(2)
+
+        def on_replaygain_changed(row, pspec):
+            selected = row.get_selected()
+            if selected == 0:
+                save_setting("replaygain_mode", "off")
+            elif selected == 1:
+                save_setting("replaygain_mode", "track")
+            elif selected == 2:
+                save_setting("replaygain_mode", "album")
+
+        replaygain_row.connect("notify::selected", on_replaygain_changed)
+        audio_group.add(replaygain_row)
 
         # Page 2: Connections
         conn_page = Adw.PreferencesPage()
@@ -99,7 +140,46 @@ class SettingsDialog(Adw.PreferencesWindow):
         btn_row.add_suffix(self.action_btn)
         lastfm_group.add(btn_row)
 
+        # Page 3: Smart Playlists
+        smart_page = Adw.PreferencesPage()
+        smart_page.set_title("Listas Inteligentes")
+        smart_page.set_icon_name("folder-music-symbolic")
+        self.add(smart_page)
+
+        smart_group = Adw.PreferencesGroup()
+        smart_group.set_title("Listas de reproducción automáticas")
+        smart_group.set_description("Las listas inteligentes se actualizan solas según las reglas definidas")
+        smart_page.add(smart_group)
+
+        PRESET_RULES = [
+            ("Recién Añadido", "Canciones agregadas recientemente", {"year_min": 2024}),
+            ("Favoritos", "Canciones con mejor valoración", {"rating_min": 4}),
+            ("Más Escuchadas", "Canciones con más reproducciones", {"play_count_min": 10}),
+            ("Jazz", "Canciones del género Jazz", {"genre": "Jazz"}),
+            ("Rock", "Canciones del género Rock", {"genre": "Rock"}),
+            ("Electrónica", "Canciones del género Electrónica", {"genre": "Electronic"}),
+        ]
+
+        for name, desc, rules in PRESET_RULES:
+            row = Adw.ActionRow()
+            row.set_title(name)
+            row.set_subtitle(desc)
+            btn = Gtk.Button(label="Reproducir")
+            btn.set_valign(Gtk.Align.CENTER)
+            btn.set_css_classes(["suggested-action"])
+            btn.connect("clicked", self._on_play_smart, rules)
+            row.add_suffix(btn)
+            smart_group.add(row)
+
         self._update_lastfm_ui()
+
+    def _on_play_smart(self, btn, rules):
+        db = self.parent_window.db
+        songs = evaluate_rules(db, rules)
+        if songs:
+            for cb in self.parent_window._library_view._play_song_cbs:
+                cb(songs[0], songs)
+            self.close()
 
     def _update_lastfm_ui(self):
         if self.lastfm.connected:

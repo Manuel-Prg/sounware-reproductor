@@ -1,17 +1,36 @@
+import os
+from pathlib import Path
+
+# Temporarily override XDG_CONFIG_HOME during GTK initialization to bypass
+# global custom GTK themes (like Orchis-Grey-Dark) that override Adwaita and block light/dark switching.
+original_xdg_config = os.environ.get("XDG_CONFIG_HOME")
+os.environ["XDG_CONFIG_HOME"] = "/nonexistent_dummy_path"
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gst", "1.0")
 from gi.repository import Gtk, Adw, GLib, Gio
 
+# Restore original XDG_CONFIG_HOME so other modules (like config.py) can resolve user configuration paths.
+if original_xdg_config is not None:
+    os.environ["XDG_CONFIG_HOME"] = original_xdg_config
+else:
+    os.environ.pop("XDG_CONFIG_HOME", None)
+
 import sys
 
 from typing import Optional
 
+from soundwave.library.config import load_settings, apply_theme
 from soundwave.library.database import Database
 from soundwave.library.lastfm import LastFmScrobbler
 from soundwave.player.engine import Player, PlayerState
 from soundwave.ui.window import SoundwaveWindow
+
+# Re-override XDG_CONFIG_HOME to a dummy path for the rest of the application lifetime
+# so GTK never loads the custom gtk.css stylesheet during window realization or theme reloads.
+os.environ["XDG_CONFIG_HOME"] = "/nonexistent_dummy_path"
 
 
 APP_ID = "io.github.soundwave.Soundwave"
@@ -34,6 +53,11 @@ class SoundwaveApp(Adw.Application):
             self._window.present()
             return
 
+        # Load and apply theme settings on startup
+        settings = load_settings()
+        theme = settings.get("theme", "system")
+        apply_theme(theme)
+
         self._db = Database()
         self._player = Player()
         self._lastfm = LastFmScrobbler()
@@ -44,7 +68,7 @@ class SoundwaveApp(Adw.Application):
         # Start MPRIS
         try:
             from soundwave.player.mpris import MprisService
-            self._mpris = MprisService(self._player)
+            self._mpris = MprisService(self._player, raise_callback=lambda: self._window.present())
         except Exception as e:
             print(f"MPRIS no disponible: {e}", file=sys.stderr)
 

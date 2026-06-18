@@ -32,6 +32,8 @@ class Song:
     play_count: int = 0
     last_played: Optional[float] = None
     rating: int = 0
+    replaygain_track_gain: float = 0.0
+    replaygain_album_gain: float = 0.0
 
     @property
     def display_title(self) -> str:
@@ -90,7 +92,9 @@ class Database:
                 added_at REAL DEFAULT 0.0,
                 play_count INTEGER DEFAULT 0,
                 last_played REAL,
-                rating INTEGER DEFAULT 0
+                rating INTEGER DEFAULT 0,
+                replaygain_track_gain REAL DEFAULT 0.0,
+                replaygain_album_gain REAL DEFAULT 0.0
             );
 
             CREATE TABLE IF NOT EXISTS playlists (
@@ -115,6 +119,16 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs(genre);
             CREATE INDEX IF NOT EXISTS idx_songs_filepath ON songs(filepath);
         """)
+        # Migración automática para bases de datos ya existentes
+        try:
+            self.conn.execute("SELECT replaygain_track_gain FROM songs LIMIT 1")
+        except sqlite3.OperationalError:
+            try:
+                self.conn.execute("ALTER TABLE songs ADD COLUMN replaygain_track_gain REAL DEFAULT 0.0")
+                self.conn.execute("ALTER TABLE songs ADD COLUMN replaygain_album_gain REAL DEFAULT 0.0")
+                self.conn.commit()
+            except Exception as e:
+                print(f"Error al realizar migración de base de datos para ReplayGain: {e}")
         self.conn.commit()
 
     # ---- Songs ----
@@ -122,8 +136,9 @@ class Database:
         cur = self.conn.execute("""
             INSERT INTO songs (filepath,title,artist,album,album_artist,
                 track_number,disc_number,duration,genre,year,composer,
-                has_embedded_art,art_mime,file_size,modified_at,added_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                has_embedded_art,art_mime,file_size,modified_at,added_at,
+                replaygain_track_gain,replaygain_album_gain)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(filepath) DO UPDATE SET
                 title=excluded.title, artist=excluded.artist,
                 album=excluded.album, album_artist=excluded.album_artist,
@@ -132,14 +147,17 @@ class Database:
                 year=excluded.year, composer=excluded.composer,
                 has_embedded_art=excluded.has_embedded_art,
                 art_mime=excluded.art_mime, file_size=excluded.file_size,
-                modified_at=excluded.modified_at
+                modified_at=excluded.modified_at,
+                replaygain_track_gain=excluded.replaygain_track_gain,
+                replaygain_album_gain=excluded.replaygain_album_gain
             RETURNING id
         """, (
             song.filepath, song.title, song.artist, song.album,
             song.album_artist, song.track_number, song.disc_number,
             song.duration, song.genre, song.year, song.composer,
             int(song.has_embedded_art), song.art_mime,
-            song.file_size, song.modified_at, song.added_at
+            song.file_size, song.modified_at, song.added_at,
+            song.replaygain_track_gain, song.replaygain_album_gain
         ))
         row = cur.fetchone()
         self.conn.commit()
@@ -335,7 +353,9 @@ class Database:
             art_mime=row["art_mime"], file_size=row["file_size"],
             modified_at=row["modified_at"], added_at=row["added_at"],
             play_count=row["play_count"], last_played=row["last_played"],
-            rating=row["rating"]
+            rating=row["rating"],
+            replaygain_track_gain=row["replaygain_track_gain"] if "replaygain_track_gain" in row.keys() else 0.0,
+            replaygain_album_gain=row["replaygain_album_gain"] if "replaygain_album_gain" in row.keys() else 0.0
         )
 
     def close(self):

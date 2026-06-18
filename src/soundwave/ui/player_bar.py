@@ -12,6 +12,8 @@ from soundwave.library.database import Song
 
 ToggleMiniCallback = Callable[[], None]
 ShowEqualizerCallback = Callable[[], None]
+ToggleLyricsCallback = Callable[[], None]
+NavigateAlbumCallback = Callable[[], None]
 
 
 class PlayerBar(Gtk.Box):
@@ -20,6 +22,8 @@ class PlayerBar(Gtk.Box):
         self._player = player
         self._toggle_mini_cbs: list[ToggleMiniCallback] = []
         self._show_eq_cbs: list[ShowEqualizerCallback] = []
+        self._toggle_lyrics_cbs: list[ToggleLyricsCallback] = []
+        self._navigate_album_cbs: list[NavigateAlbumCallback] = []
         self._toggle_fullscreen_cbs: list[Callable] = []
         self._toggle_sidebar_cbs: list[Callable] = []
 
@@ -45,6 +49,10 @@ class PlayerBar(Gtk.Box):
         self._art_image.set_size_request(56, 56)
         self._art_image.set_content_fit(Gtk.ContentFit.COVER)
         self._art_image.set_css_classes(["album-cover"])
+        self._art_image.set_tooltip_text("Ir al álbum")
+        art_gesture = Gtk.GestureClick()
+        art_gesture.connect("pressed", lambda g, n, x, y: self._emit_navigate_album())
+        self._art_image.add_controller(art_gesture)
         left_box.append(self._art_image)
 
         info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
@@ -141,6 +149,14 @@ class PlayerBar(Gtk.Box):
         self._shuffle_button.set_tooltip_text("Aleatorio")
         self._shuffle_button.connect("toggled", self._on_shuffle_toggled)
         right_box.append(self._shuffle_button)
+
+        # Lyrics button
+        self._lyrics_btn = Gtk.ToggleButton()
+        self._lyrics_btn.set_child(Gtk.Image.new_from_icon_name("document-edit-symbolic"))
+        self._lyrics_btn.set_css_classes(["flat", "circular"])
+        self._lyrics_btn.set_tooltip_text("Letras")
+        self._lyrics_btn.connect("toggled", lambda b: self._emit_toggle_lyrics())
+        right_box.append(self._lyrics_btn)
 
         # Equalizer button
         self._eq_button = Gtk.Button.new_from_icon_name("preferences-desktop-sound-symbolic")
@@ -301,11 +317,21 @@ class PlayerBar(Gtk.Box):
     def connect_show_equalizer(self, cb: ShowEqualizerCallback):
         self._show_eq_cbs.append(cb)
 
+    def connect_navigate_album(self, cb: NavigateAlbumCallback):
+        self._navigate_album_cbs.append(cb)
+
+    def connect_toggle_lyrics(self, cb: ToggleLyricsCallback):
+        self._toggle_lyrics_cbs.append(cb)
+
     def connect_toggle_fullscreen(self, cb: Callable):
         self._toggle_fullscreen_cbs.append(cb)
 
     def connect_toggle_sidebar(self, cb: Callable):
         self._toggle_sidebar_cbs.append(cb)
+
+    def _emit_navigate_album(self):
+        for cb in self._navigate_album_cbs:
+            cb()
 
     def _emit_toggle_mini(self):
         for cb in self._toggle_mini_cbs:
@@ -313,6 +339,10 @@ class PlayerBar(Gtk.Box):
 
     def _emit_show_equalizer(self):
         for cb in self._show_eq_cbs:
+            cb()
+
+    def _emit_toggle_lyrics(self):
+        for cb in self._toggle_lyrics_cbs:
             cb()
 
     def _emit_toggle_fullscreen(self):

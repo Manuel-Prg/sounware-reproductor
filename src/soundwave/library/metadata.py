@@ -105,6 +105,61 @@ def read_metadata(filepath: str) -> Optional[Song]:
     if composer:
         song.composer = composer
 
+    # Extraer etiquetas de ReplayGain
+    track_gain_str = _get_tag(mfile, "replaygain_track_gain", "REPLAYGAIN_TRACK_GAIN")
+    album_gain_str = _get_tag(mfile, "replaygain_album_gain", "REPLAYGAIN_ALBUM_GAIN")
+    song.replaygain_track_gain = _parse_gain(track_gain_str)
+    song.replaygain_album_gain = _parse_gain(album_gain_str)
+
+    # Adivinar metadatos a partir del nombre del archivo y la jerarquía de carpetas
+    if not song.title or not song.artist:
+        stem = path.stem
+        guessed_artist = ""
+        guessed_title = ""
+        if " - " in stem:
+            parts = stem.split(" - ", 1)
+            guessed_artist = parts[0].strip()
+            guessed_title = parts[1].strip()
+        elif "-" in stem:
+            parts = stem.split("-", 1)
+            guessed_artist = parts[0].strip()
+            guessed_title = parts[1].strip()
+        else:
+            guessed_title = stem.strip()
+
+        # Limpiar prefijo de número de pista si está en el título (ej: "01 Song Title" -> "Song Title")
+        if guessed_title:
+            import re
+            guessed_title = re.sub(r"^\d+[\s._-]+", "", guessed_title).strip()
+
+        if not song.title and guessed_title:
+            song.title = guessed_title
+        if not song.artist and guessed_artist:
+            song.artist = guessed_artist
+
+    if not song.artist:
+        parent = path.parent
+        grandparent = parent.parent if parent else None
+        ignore_dirs = {"music", "musica", "downloads", "descargas", "documents", "documentos", "desktop", "escritorio", "temp", "tmp", "user", "home", "media", "mnt", "run"}
+        
+        parent_name = parent.name.strip() if parent else ""
+        gparent_name = grandparent.name.strip() if grandparent else ""
+        
+        # Estructura: .../Artista/Álbum/Canción.mp3
+        if gparent_name and gparent_name.lower() not in ignore_dirs and len(gparent_name) > 1:
+            song.artist = gparent_name
+            if not song.album and parent_name and parent_name.lower() not in ignore_dirs:
+                song.album = parent_name
+        # Estructura: .../Artista/Canción.mp3 o .../Artista - Álbum/Canción.mp3
+        elif parent_name and parent_name.lower() not in ignore_dirs and len(parent_name) > 1:
+            if " - " in parent_name:
+                parts = parent_name.split(" - ", 1)
+                song.artist = parts[0].strip()
+                if not song.album:
+                    song.album = parts[1].strip()
+            else:
+                song.artist = parent_name
+
     return song
 
 
@@ -298,3 +353,13 @@ def _parse_int(raw: str, default: int = 0) -> int:
         return int(raw.strip())
     except ValueError:
         return default
+
+
+def _parse_gain(raw: str) -> float:
+    if not raw:
+        return 0.0
+    cleaned = raw.lower().replace("db", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0

@@ -1,7 +1,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, GLib, Gio
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 
 from pathlib import Path
 from typing import Optional
@@ -16,6 +16,7 @@ from soundwave.ui.search_bar import SearchBar
 from soundwave.ui.equalizer import EqualizerDialog
 from soundwave.ui.mini_player import MiniPlayer
 from soundwave.ui.settings import SettingsDialog
+from soundwave.ui.lyrics_view import LyricsView
 
 
 class SoundwaveWindow(Adw.ApplicationWindow):
@@ -29,6 +30,8 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._current_queue: list[Song] = []
         self._current_queue_source: str = "all"
         self._lastfm = None
+        self._scrobbled_song_id: Optional[int] = None
+        self._watcher = None
 
         self.set_title("Soundwave")
         self.set_default_size(1100, 720)
@@ -62,11 +65,22 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._player_bar.connect_show_equalizer(self._on_show_equalizer)
         self._player_bar.connect_toggle_fullscreen(self._toggle_fullscreen)
         self._player_bar.connect_toggle_sidebar(self._toggle_sidebar)
+        self._player_bar.connect_navigate_album(self._on_navigate_to_album)
+        self._player_bar.connect_toggle_lyrics(self._on_toggle_lyrics)
         self._main_box.append(self._player_bar)
+
+        # Lyrics panel (hidden by default)
+        self._lyrics_view = LyricsView()
+        self._lyrics_view.set_visible(False)
+        self._lyrics_view.set_size_request(-1, 320)
+        self._main_box.append(self._lyrics_view)
 
         # Mini player (hidden initially)
         self._mini_player = MiniPlayer(player)
         self._mini_player.connect_restore_window(self._on_restore_from_mini)
+
+        # Set up drag and drop
+        self._setup_drag_drop()
 
         # Set up keyboard shortcuts
         self._setup_shortcuts()
@@ -76,26 +90,32 @@ class SoundwaveWindow(Adw.ApplicationWindow):
 
         # Connect player signals for MPRIS last.fm integration
         self.player.connect_song(self._on_player_song_changed)
+        self.player.connect_position(self._on_player_position_changed)
 
         # Sync fullscreen button state when window state changes
         self.connect("notify::fullscreened", self._on_fullscreen_changed)
 
+        # Configurar y arrancar FolderWatcher para directorios de música
+        self._start_folder_watcher()
+        self.connect("destroy", self._on_destroy)
+
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
         css = """
-        @define-color accent_bg_color #7f39fb;
-        @define-color accent_color #7f39fb;
+        @define-color accent_bg_color #1DB954;
+        @define-color accent_color #1DB954;
         @define-color accent_fg_color #ffffff;
 
         .navigation-sidebar {
             background-color: @view_bg_color;
             border-right: 1px solid @borders;
         }
-        .dark .navigation-sidebar {
-            background-color: #1a1a1a;
-            border-right: none;
+        .navigation-sidebar headerbar {
+            background: none;
+            background-color: transparent;
+            border-bottom: none;
+            box-shadow: none;
         }
-
         .sidebar-row {
             border-radius: 99px;
             margin: 4px 12px;
@@ -103,7 +123,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         }
         .sidebar-row:selected {
             background-color: @accent_bg_color;
-            color: @accent_fg_color;
+            color: #000000;
         }
         .player-bar {
             background-color: @window_bg_color;
@@ -119,7 +139,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             transition: all 0.2s ease;
         }
         .album-grid flowboxchild:hover, .artist-grid flowboxchild:hover {
-            background-color: alpha(white, 0.05);
+            background-color: alpha(@accent_bg_color, 0.04);
         }
         .album-card, .artist-card {
             padding: 8px;
@@ -131,22 +151,21 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             border-radius: 9999px;
         }
         .album-card:hover avatar, .artist-card:hover avatar {
-            transform: scale(1.06);
+            transform: scale(1.04);
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
         }
         .album-card-title, .artist-card-name {
-            color: #ffffff;
             font-weight: bold;
             font-size: 13px;
             margin-top: 4px;
         }
         .album-card-subtitle, .artist-card-subtitle {
-            color: rgba(255, 255, 255, 0.6);
             font-size: 11px;
+            color: alpha(currentColor, 0.6);
         }
         .album-play-btn {
-            background-color: #7f39fb;
-            color: white;
+            background-color: @accent_bg_color;
+            color: #000000;
             border-radius: 99px;
             border: none;
             opacity: 0.0;
@@ -156,24 +175,21 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             opacity: 1.0;
         }
         .album-play-btn:hover {
-            background-color: #9254fd;
+            background-color: #1ED760;
             transform: scale(1.1);
         }
         .genre-card {
             padding: 16px;
             border-radius: 12px;
             background-color: @card_bg_color;
-            border: 1px solid alpha(@borders, 0.5);
             transition: all 0.2s ease;
         }
         .genre-card:hover {
-            transform: translateY(-4px);
+            transform: scale(1.04);
             background-color: alpha(@accent_bg_color, 0.08);
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
-            border-color: alpha(@accent_bg_color, 0.3);
         }
         .genre-icon-box {
-            background-color: alpha(@accent_bg_color, 0.1);
+            background-color: alpha(@accent_bg_color, 0.12);
             color: @accent_bg_color;
             padding: 8px;
             border-radius: 8px;
@@ -186,7 +202,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         }
         .genre-count {
             font-size: 12px;
-            color: alpha(@window_fg_color, 0.6);
+            color: alpha(currentColor, 0.6);
         }
         .song-row {
             border-radius: 8px;
@@ -195,7 +211,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             transition: background-color 0.2s ease;
         }
         .song-row:hover {
-            background-color: alpha(@accent_bg_color, 0.06);
+            background-color: alpha(@accent_bg_color, 0.04);
         }
         .song-row:selected {
             background-color: alpha(@accent_bg_color, 0.15);
@@ -208,18 +224,82 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         }
         .mini-player {
             background-color: @window_bg_color;
-            border: 1px solid @borders;
         }
         .play-button-main {
             background-color: @accent_bg_color;
-            color: @accent_fg_color;
+            color: #000000;
             border-radius: 50%;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 14px rgba(29, 185, 84, 0.3);
             transition: all 0.2s ease;
         }
         .play-button-main:hover {
-            transform: scale(1.05);
-            background-color: alpha(@accent_bg_color, 0.9);
+            transform: scale(1.08);
+            background-color: #1ED760;
+            box-shadow: 0 6px 20px rgba(29, 185, 84, 0.45);
+        }
+        .green-deck-btn {
+            background-color: @accent_bg_color;
+            color: #000000;
+            border-radius: 50%;
+            box-shadow: 0 4px 14px rgba(29, 185, 84, 0.3);
+            transition: all 0.2s ease;
+        }
+        .green-deck-btn:hover {
+            transform: scale(1.08);
+            background-color: #1ED760;
+        }
+        .now-playing-row {
+            border-left: 3px solid @accent_bg_color;
+            background-color: alpha(@accent_bg_color, 0.06);
+        }
+        scale.horizontal trough {
+            min-height: 4px;
+            border-radius: 2px;
+            background-color: alpha(currentColor, 0.12);
+        }
+        scale.horizontal highlight {
+            min-height: 4px;
+            border-radius: 2px;
+            background-color: @accent_bg_color;
+        }
+        scale.horizontal slider {
+            min-height: 14px;
+            min-width: 14px;
+            border-radius: 50%;
+            background-color: @accent_bg_color;
+            box-shadow: 0 2px 6px rgba(29, 185, 84, 0.4);
+        }
+        .album-cover {
+            border-radius: 6px;
+        }
+        .green-deck-header {
+            background-color: @window_bg_color;
+            border-bottom: 1px solid @borders;
+        }
+        .songs-list > row {
+            border-radius: 8px;
+            padding: 4px 12px;
+            margin: 1px 8px;
+            transition: background-color 0.15s ease;
+        }
+        .songs-list > row:hover {
+            background-color: alpha(@accent_bg_color, 0.04);
+        }
+        .songs-list > row:selected {
+            background-color: alpha(@accent_bg_color, 0.15);
+        }
+        .lyrics-line {
+            font-size: 16px;
+            padding: 4px 0;
+            transition: all 0.3s ease;
+        }
+        .lyrics-line-inactive {
+            color: alpha(@window_fg_color, 0.35);
+        }
+        .lyrics-line-active {
+            color: @accent_bg_color;
+            font-weight: bold;
+            font-size: 18px;
         }
         """
         css_provider.load_from_string(css)
@@ -235,19 +315,30 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         sidebar.add_css_class("navigation-sidebar")
 
         header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label="Soundwave"))
+        header.add_css_class("green-deck-header")
+        header.set_title_widget(Gtk.Label(label=""))  # Clear center title
+
+        # Pack title label on the left (start)
+        title_label = Gtk.Label(label="Soundwave")
+        title_label.add_css_class("title")
+        title_label.set_halign(Gtk.Align.START)
+        title_label.set_margin_start(28)
+        header.pack_start(title_label)
+
+        # Pack collapse button first, then settings button, so they sit side-by-side at the end (right side)
+        # of the sidebar header, leaving the start (left side) clear for system window controls.
+        collapse_btn = Gtk.Button.new_from_icon_name("sidebar-hide-symbolic")
+        collapse_btn.set_css_classes(["flat", "circular"])
+        collapse_btn.set_tooltip_text("Colapsar barra lateral")
+        collapse_btn.connect("clicked", lambda b: self._toggle_sidebar())
+        collapse_btn.set_margin_end(12)
+        header.pack_end(collapse_btn)
 
         settings_btn = Gtk.Button.new_from_icon_name("preferences-system-symbolic")
         settings_btn.set_css_classes(["flat", "circular"])
         settings_btn.set_tooltip_text("Ajustes")
         settings_btn.connect("clicked", lambda b: self._on_show_settings())
-        header.pack_start(settings_btn)
-
-        collapse_btn = Gtk.Button.new_from_icon_name("sidebar-hide-symbolic")
-        collapse_btn.set_css_classes(["flat", "circular"])
-        collapse_btn.set_tooltip_text("Colapsar barra lateral")
-        collapse_btn.connect("clicked", lambda b: self._toggle_sidebar())
-        header.pack_end(collapse_btn)
+        header.pack_end(settings_btn)
 
         sidebar.append(header)
 
@@ -266,6 +357,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             ("avatar-default-symbolic", "Artistas", "artists"),
             ("folder-music-symbolic", "Géneros", "genres"),
         ]
+        self._sidebar_count_labels = {}
         for icon_name, label, view_id in items:
             row = Adw.ActionRow()
             row.set_activatable(True)
@@ -275,6 +367,14 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             row.add_prefix(icon)
             row.set_css_classes(["sidebar-row"])
             row._view_id = view_id
+
+            # Create a suffix label for the count
+            count_label = Gtk.Label()
+            count_label.add_css_class("dim-label")
+            count_label.set_margin_end(6)
+            row.add_suffix(count_label)
+            self._sidebar_count_labels[view_id] = count_label
+
             self._sidebar_list.append(row)
 
         self._sidebar_list.connect("row-activated", self._on_sidebar_row_activated)
@@ -290,6 +390,30 @@ class SoundwaveWindow(Adw.ApplicationWindow):
     def _build_toolbar_view(self) -> Adw.ToolbarView:
         tv = Adw.ToolbarView()
         return tv
+
+    def _setup_drag_drop(self):
+        drop_target = Gtk.DropTarget.new(Gio.File, Gdk.DragAction.COPY)
+        drop_target.connect("accept", self._on_drag_accept)
+        drop_target.connect("drop", self._on_drag_drop)
+        self.add_controller(drop_target)
+
+    def _on_drag_accept(self, drop_target, drop):
+        return True
+
+    def _on_drag_drop(self, drop_target, value, x, y):
+        file = value
+        if not file:
+            return False
+        path = file.get_path()
+        if not path:
+            return False
+        from pathlib import Path
+        p = Path(path)
+        if p.is_dir():
+            self._start_scan(p)
+        elif p.suffix.lower() in (".mp3", ".flac", ".ogg", ".m4a", ".wav", ".wma", ".opus"):
+            self._start_scan(p.parent)
+        return True
 
     def _setup_shortcuts(self):
         ctrl = Gtk.ShortcutController()
@@ -387,6 +511,15 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             dialog.show()
 
     def _start_scan(self, directory: Path):
+        # Guardar la carpeta seleccionada en la configuración para el watcher y futuros escaneos
+        from soundwave.library.config import load_settings, save_setting
+        settings = load_settings()
+        dirs = settings.get("music_directories", [])
+        dir_str = str(directory.resolve())
+        if dir_str not in dirs:
+            dirs.append(dir_str)
+            save_setting("music_directories", dirs)
+
         self._scan_dialog = Adw.AlertDialog(
             heading="Escaneando...",
             body="Buscando archivos de música...",
@@ -421,6 +554,8 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             pass
         self._refresh_library()
         self._show_stats_notification(added)
+        # Reiniciar el watcher para que empiece a vigilar la nueva carpeta y subcarpetas
+        self._start_folder_watcher()
 
     def _show_stats_notification(self, added: int):
         stats = self.db.get_stats()
@@ -435,10 +570,18 @@ class SoundwaveWindow(Adw.ApplicationWindow):
 
     def _refresh_sidebar_counts(self):
         stats = self.db.get_stats()
-        for i in range(self._sidebar_list.get_row_at_index(0) is not None and 4 or 0):
-            row = self._sidebar_list.get_row_at_index(i)
-            if row and i == 0:
-                row.set_subtitle(str(stats["total_songs"]))
+        try:
+            genres_count = self.db.conn.execute(
+                "SELECT COUNT(DISTINCT CASE WHEN genre = '' OR genre IS NULL THEN 'Sin género' ELSE genre END) FROM songs"
+            ).fetchone()[0]
+        except Exception:
+            genres_count = 0
+
+        if hasattr(self, "_sidebar_count_labels"):
+            self._sidebar_count_labels["all"].set_text(str(stats.get("total_songs", 0)))
+            self._sidebar_count_labels["albums"].set_text(str(stats.get("total_albums", 0)))
+            self._sidebar_count_labels["artists"].set_text(str(stats.get("total_artists", 0)))
+            self._sidebar_count_labels["genres"].set_text(str(genres_count))
 
     # --- Sidebar navigation ---
     def _on_sidebar_row_activated(self, listbox, row):
@@ -463,7 +606,31 @@ class SoundwaveWindow(Adw.ApplicationWindow):
     def _on_queue_song(self, song: Song):
         self.player.add_to_queue(song)
 
+    def _on_player_position_changed(self, pos):
+        if self._lyrics_view.get_visible():
+            self._lyrics_view.update_position(pos.current_seconds * 1000)
+        self._check_scrobble(pos)
+
+    def _check_scrobble(self, pos):
+        if not self._lastfm or not self._lastfm.connected:
+            return
+        song = self.player.get_current_song()
+        if not song or song.id == self._scrobbled_song_id:
+            return
+        current_s = pos.current_seconds
+        duration_s = pos.duration_seconds
+        if duration_s <= 0:
+            return
+        half_duration = duration_s / 2
+        if current_s >= min(half_duration, 240):
+            self._lastfm.scrobble(
+                song.display_artist, song.display_title,
+                song.display_album, int(song.duration)
+            )
+            self._scrobbled_song_id = song.id
+
     def _on_player_song_changed(self, song: Optional[Song]):
+        self._scrobbled_song_id = None
         if song and self._lastfm and self._lastfm.connected:
             self._lastfm.now_playing(
                 song.display_artist, song.display_title, song.display_album,
@@ -473,6 +640,8 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         art_path = get_art_path(song.id, self.db) if song else None
         self._player_bar.set_artwork_from_path(art_path)
         self._mini_player.set_artwork_from_path(art_path)
+        if self._lyrics_view.get_visible() and song:
+            self._lyrics_view.load_song(song)
 
     # --- Mini player ---
     def _on_toggle_mini(self):
@@ -504,6 +673,28 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._split_view.set_show_sidebar(not shown)
         self._player_bar.set_sidebar_state(not shown)
 
+    # --- Navigation from player bar ---
+    def _on_navigate_to_album(self):
+        song = self.player.get_current_song()
+        if not song:
+            return
+        album_name = song.display_album
+        album_artist = song.album_artist or song.artist or ""
+        albums = self.db.get_albums()
+        for a in albums:
+            if a["album"] == album_name and (
+                not album_artist or a.get("album_artist", "") == album_artist
+            ):
+                self._library_view._show_album_songs(a)
+                break
+
+    # --- Lyrics ---
+    def _on_toggle_lyrics(self):
+        visible = not self._lyrics_view.get_visible()
+        self._lyrics_view.set_visible(visible)
+        if visible and self.player.get_current_song():
+            self._lyrics_view.load_song(self.player.get_current_song())
+
     # --- Equalizer ---
     def _on_show_equalizer(self):
         dialog = EqualizerDialog(self.player, self)
@@ -519,3 +710,33 @@ class SoundwaveWindow(Adw.ApplicationWindow):
 
     def get_player_bar(self):
         return self._player_bar
+
+    # --- Folder Watcher & Destructor ---
+    def _start_folder_watcher(self):
+        from soundwave.library.watcher import FolderWatcher
+        from soundwave.library.config import load_settings
+
+        if self._watcher:
+            self._watcher.stop()
+
+        def on_watcher_event(filepath: Path, event: str):
+            print(f"[Watcher] Evento de sistema de archivos '{event}': {filepath}")
+            if event in ("created", "modified"):
+                self.scanner.scan_single_file(filepath)
+            elif event == "deleted":
+                self.db.remove_song_by_path(str(filepath))
+            
+            # Refrescar biblioteca en la UI
+            GLib.idle_add(self._refresh_library)
+
+        self._watcher = FolderWatcher(on_watcher_event)
+        
+        settings = load_settings()
+        dirs = settings.get("music_directories", [])
+        watch_paths = [Path(d) for d in dirs if Path(d).exists()]
+        if watch_paths:
+            self._watcher.start_watching(watch_paths)
+
+    def _on_destroy(self, *args):
+        if self._watcher:
+            self._watcher.stop()

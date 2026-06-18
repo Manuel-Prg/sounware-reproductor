@@ -403,7 +403,7 @@ class Player:
 
     def _on_about_to_finish(self, playbin):
         if self._repeat_mode == RepeatMode.ONE and self._current_song:
-            self.play_file(self._current_song)
+            GLib.idle_add(lambda: self.play_file(self._current_song))
             return
         next_idx = self._current_index + 1
         if next_idx >= len(self._queue):
@@ -416,7 +416,7 @@ class Player:
         self._current_song = song
         self._playbin.set_property("uri", Path(song.filepath).resolve().as_uri())
         self._apply_volume_with_gain()
-        self._emit_song()
+        GLib.idle_add(lambda: self._emit_song())
 
     def _on_bus_message(self, bus, message):
         t = message.type

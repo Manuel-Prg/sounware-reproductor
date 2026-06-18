@@ -5,8 +5,7 @@ from gi.repository import Gtk, Adw, GLib
 
 from pathlib import Path
 from soundwave.library.config import save_setting, apply_theme
-from soundwave.library.smart_playlist import evaluate_rules
-from soundwave.library.database import Database
+
 
 class SettingsDialog(Adw.PreferencesWindow):
     def __init__(self, parent_window, lastfm):
@@ -140,46 +139,7 @@ class SettingsDialog(Adw.PreferencesWindow):
         btn_row.add_suffix(self.action_btn)
         lastfm_group.add(btn_row)
 
-        # Page 3: Smart Playlists
-        smart_page = Adw.PreferencesPage()
-        smart_page.set_title("Listas Inteligentes")
-        smart_page.set_icon_name("folder-music-symbolic")
-        self.add(smart_page)
-
-        smart_group = Adw.PreferencesGroup()
-        smart_group.set_title("Listas de reproducción automáticas")
-        smart_group.set_description("Las listas inteligentes se actualizan solas según las reglas definidas")
-        smart_page.add(smart_group)
-
-        PRESET_RULES = [
-            ("Recién Añadido", "Canciones agregadas recientemente", {"year_min": 2024}),
-            ("Favoritos", "Canciones con mejor valoración", {"rating_min": 4}),
-            ("Más Escuchadas", "Canciones con más reproducciones", {"play_count_min": 10}),
-            ("Jazz", "Canciones del género Jazz", {"genre": "Jazz"}),
-            ("Rock", "Canciones del género Rock", {"genre": "Rock"}),
-            ("Electrónica", "Canciones del género Electrónica", {"genre": "Electronic"}),
-        ]
-
-        for name, desc, rules in PRESET_RULES:
-            row = Adw.ActionRow()
-            row.set_title(name)
-            row.set_subtitle(desc)
-            btn = Gtk.Button(label="Reproducir")
-            btn.set_valign(Gtk.Align.CENTER)
-            btn.set_css_classes(["suggested-action"])
-            btn.connect("clicked", self._on_play_smart, rules)
-            row.add_suffix(btn)
-            smart_group.add(row)
-
         self._update_lastfm_ui()
-
-    def _on_play_smart(self, btn, rules):
-        db = self.parent_window.db
-        songs = evaluate_rules(db, rules)
-        if songs:
-            for cb in self.parent_window._library_view._play_song_cbs:
-                cb(songs[0], songs)
-            self.close()
 
     def _update_lastfm_ui(self):
         if self.lastfm.connected:

@@ -204,6 +204,26 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             font-size: 12px;
             color: alpha(currentColor, 0.6);
         }
+        .smart-card {
+            padding: 16px;
+            border-radius: 12px;
+            background-color: @card_bg_color;
+            transition: all 0.2s ease;
+        }
+        .smart-card:hover {
+            transform: scale(1.04);
+            background-color: alpha(@accent_bg_color, 0.08);
+        }
+        .card-subtitle {
+            font-size: 12px;
+        }
+        .play-pulse {
+            transition: all 0.2s ease;
+        }
+        .play-pulse:hover {
+            background-color: @accent_bg_color;
+            color: @accent_fg_color;
+        }
         .song-row {
             border-radius: 8px;
             padding: 8px 16px;
@@ -356,6 +376,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             ("media-optical-symbolic", "Álbumes", "albums"),
             ("avatar-default-symbolic", "Artistas", "artists"),
             ("folder-music-symbolic", "Géneros", "genres"),
+            ("view-list-symbolic", "Listas Inteligentes", "smart"),
         ]
         self._sidebar_count_labels = {}
         for icon_name, label, view_id in items:

@@ -1,7 +1,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, Pango
+from gi.repository import Gtk, Adw, Gdk, Pango, GLib
 
 from pathlib import Path
 from typing import Optional, Callable
@@ -48,8 +48,18 @@ class LibraryView(Gtk.Box):
         self._build_artists_view()
         self._build_genres_view()
         self._build_search_view()
+        self._build_smart_view()
 
         self._stack.set_visible_child_name("songs")
+
+    PRESET_RULES = [
+        ("Recién Añadido", "Canciones agregadas recientemente", "list-add-symbolic", {"year_min": 2024}),
+        ("Favoritos", "Canciones con mejor valoración", "emblem-favorite-symbolic", {"rating_min": 4}),
+        ("Más Escuchadas", "Canciones con más reproducciones", "emblem-important-symbolic", {"play_count_min": 10}),
+        ("Jazz", "Canciones del género Jazz", "audio-x-generic-symbolic", {"genre": "Jazz"}),
+        ("Rock", "Canciones del género Rock", "audio-x-generic-symbolic", {"genre": "Rock"}),
+        ("Electrónica", "Canciones del género Electrónica", "audio-x-generic-symbolic", {"genre": "Electronic"}),
+    ]
 
     def _build_songs_view(self):
         scrolled = Gtk.ScrolledWindow()
@@ -125,6 +135,78 @@ class LibraryView(Gtk.Box):
         scrolled.set_child(self._search_list)
         self._stack.add_named(scrolled, "search")
 
+    def _build_smart_view(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        self._smart_flow = Gtk.FlowBox()
+        self._smart_flow.set_max_children_per_line(6)
+        self._smart_flow.set_min_children_per_line(2)
+        self._smart_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._smart_flow.set_homogeneous(True)
+        self._smart_flow.set_column_spacing(16)
+        self._smart_flow.set_row_spacing(16)
+        self._smart_flow.set_halign(Gtk.Align.FILL)
+        self._smart_flow.set_valign(Gtk.Align.START)
+        scrolled.set_child(self._smart_flow)
+        self._stack.add_named(scrolled, "smart")
+
+    def _populate_smart(self):
+        while True:
+            child = self._smart_flow.get_first_child()
+            if child:
+                self._smart_flow.remove(child)
+            else:
+                break
+        for name, desc, icon, rules in self.PRESET_RULES:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            card.set_css_classes(["smart-card"])
+            card.set_size_request(-1, 120)
+            card.set_halign(Gtk.Align.FILL)
+            card.set_valign(Gtk.Align.FILL)
+
+            icon_w = Gtk.Image.new_from_icon_name(icon)
+            icon_w.set_pixel_size(32)
+            icon_w.set_margin_top(16)
+            card.append(icon_w)
+
+            title = Gtk.Label(label=name)
+            title.set_css_classes(["card-title"])
+            title.set_max_width_chars(16)
+            title.set_wrap(True)
+            title.set_halign(Gtk.Align.CENTER)
+            card.append(title)
+
+            subtitle = Gtk.Label(label=desc)
+            subtitle.set_css_classes(["dim-label", "card-subtitle"])
+            subtitle.set_max_width_chars(16)
+            subtitle.set_wrap(True)
+            subtitle.set_halign(Gtk.Align.CENTER)
+            card.append(subtitle)
+
+            spacer = Gtk.Label()
+            spacer.set_vexpand(True)
+            card.append(spacer)
+
+            play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
+            play_btn.set_css_classes(["circular", "play-pulse"])
+            play_btn.set_halign(Gtk.Align.CENTER)
+            play_btn.set_valign(Gtk.Align.CENTER)
+            play_btn.set_margin_bottom(12)
+            play_rules = rules
+            play_btn.connect("clicked", lambda b, r=play_rules: self._on_smart_play(r))
+            card.append(play_btn)
+
+            self._smart_flow.append(card)
+
+    def _on_smart_play(self, rules: dict):
+        from soundwave.library.smart_playlist import evaluate_rules
+        songs = evaluate_rules(self.db, rules)
+        if songs:
+            for cb in self._play_song_cbs:
+                cb(songs[0], songs)
+
     # --- Public API ---
     def show_view(self, view_id: str):
         self._title_label.set_label({
@@ -132,6 +214,7 @@ class LibraryView(Gtk.Box):
             "albums": "Álbumes",
             "artists": "Artistas",
             "genres": "Géneros",
+            "smart": "Listas Inteligentes",
         }.get(view_id, "Soundwave"))
 
         if view_id == "all":
@@ -146,6 +229,9 @@ class LibraryView(Gtk.Box):
         elif view_id == "genres":
             self._populate_genres()
             self._stack.set_visible_child_name("genres")
+        elif view_id == "smart":
+            self._populate_smart()
+            self._stack.set_visible_child_name("smart")
 
     def show_search_results(self, results: list[Song]):
         self._title_label.set_label(f"Resultados: {len(results)}")
@@ -233,8 +319,8 @@ class LibraryView(Gtk.Box):
     def _build_song_row(self, song: Song) -> Adw.ActionRow:
         row = Adw.ActionRow()
         row.set_activatable(True)
-        row.set_title(song.display_title)
-        row.set_subtitle(f"{song.display_artist} · {song.display_album}")
+        row.set_title(GLib.markup_escape_text(song.display_title))
+        row.set_subtitle(GLib.markup_escape_text(f"{song.display_artist} · {song.display_album}"))
         if song.duration:
             m, s = divmod(int(song.duration), 60)
             row.add_suffix(Gtk.Label(label=f"{m}:{s:02d}"))

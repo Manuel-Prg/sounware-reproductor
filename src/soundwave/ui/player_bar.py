@@ -200,7 +200,7 @@ class PlayerBar(Gtk.Box):
         right_box.append(self._fullscreen_button)
 
         # Mini player button
-        self._mini_button = Gtk.Button.new_from_icon_name("view-compact-symbolic")
+        self._mini_button = Gtk.Button.new_from_icon_name("view-dual-symbolic")
         self._mini_button.set_css_classes(["flat", "circular"])
         self._mini_button.set_tooltip_text("Mini reproductor (Ctrl+M)")
         self._mini_button.connect("clicked", lambda b: self._emit_toggle_mini())

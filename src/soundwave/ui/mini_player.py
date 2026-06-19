@@ -23,208 +23,222 @@ class MiniPlayer(Adw.Window):
         self._restore_cbs: list[RestoreWindowCallback] = []
 
         self.set_title("Soundwave")
-        self.set_default_size(520, 120)
+        self.set_default_size(440, 140)
         self.set_resizable(False)
         self.set_decorated(False)
 
         self._theme_provider = Gtk.CssProvider()
 
         self._build_ui()
-        self._make_draggable(self._main_box)
 
         self._player.connect_state(self._on_state_changed)
         self._player.connect_song(self._on_song_changed)
         self._player.connect_position(self._on_position_changed)
 
     def _build_ui(self):
-        self._main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Main container with horizontal layout
+        self._main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         self._main_box.set_css_classes(["mini-player"])
-        self._main_box.set_cursor_from_name("grab")
+        self._main_box.set_margin_start(12)
+        self._main_box.set_margin_end(12)
+        self._main_box.set_margin_top(12)
+        self._main_box.set_margin_bottom(12)
 
-        # Thumbnail
+        # Left Column: Cover Art
         art_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         art_box.set_valign(Gtk.Align.CENTER)
-        art_box.set_margin_start(8)
 
         self._art_image = Gtk.Picture()
-        self._art_image.set_size_request(56, 56)
+        self._art_image.set_size_request(116, 116)
         self._art_image.set_content_fit(Gtk.ContentFit.COVER)
         self._art_image.set_css_classes(["mini-player-art"])
         art_box.append(self._art_image)
         self._main_box.append(art_box)
 
-        # Center: info + controls
-        center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        center_box.set_hexpand(True)
-        center_box.set_valign(Gtk.Align.CENTER)
-        center_box.set_margin_start(8)
-        center_box.set_margin_end(4)
+        # Right Column: Song metadata, playback controls, and timeline
+        right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        right_column.set_hexpand(True)
+        right_column.set_valign(Gtk.Align.CENTER)
 
-        # Row 1: title + time
-        row1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-
+        # Top row: Title/Artist + Window Management (minimize, restore, close)
+        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        
+        info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        info_box.set_hexpand(True)
+        
         self._title_label = Gtk.Label(label="Soundwave")
         self._title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._title_label.set_xalign(0)
         self._title_label.set_css_classes(["mini-player-title"])
-        self._title_label.set_hexpand(True)
-        row1.append(self._title_label)
-
-        self._time_label = Gtk.Label(label="0:00")
-        self._time_label.set_css_classes(["mini-player-time"])
-        self._time_label.set_xalign(1)
-        row1.append(self._time_label)
-
-        center_box.append(row1)
-
-        # Row 2: artist + controls + progress
-        row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row2.set_valign(Gtk.Align.CENTER)
-
+        
         self._artist_label = Gtk.Label(label="Sin reproducción")
         self._artist_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._artist_label.set_xalign(0)
         self._artist_label.set_css_classes(["mini-player-artist"])
-        self._artist_label.set_size_request(100, -1)
-        row2.append(self._artist_label)
+        
+        info_box.append(self._title_label)
+        info_box.append(self._artist_label)
+        top_row.append(info_box)
+
+        # Compact Window controls
+        win_controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        win_controls.set_valign(Gtk.Align.START)
+        
+        restore_btn = Gtk.Button.new_from_icon_name("go-up-symbolic")
+        restore_btn.set_css_classes(["flat", "circular", "mini-player-win-btn"])
+        restore_btn.set_size_request(24, 24)
+        restore_btn.set_tooltip_text("Restaurar ventana")
+        restore_btn.connect("clicked", lambda b: self._emit_restore())
+        win_controls.append(restore_btn)
+
+        close_btn = Gtk.Button.new_from_icon_name("window-close-symbolic")
+        close_btn.set_css_classes(["flat", "circular", "mini-player-win-btn"])
+        close_btn.set_size_request(24, 24)
+        close_btn.set_tooltip_text("Cerrar")
+        close_btn.connect("clicked", lambda b: self._emit_restore())
+        win_controls.append(close_btn)
+        
+        top_row.append(win_controls)
+        right_column.append(top_row)
+
+        # Media Control Buttons
+        controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        controls_row.set_halign(Gtk.Align.START)
+        controls_row.set_valign(Gtk.Align.CENTER)
 
         self._prev_button = Gtk.Button.new_from_icon_name("media-skip-backward-symbolic")
-        self._prev_button.set_css_classes(["flat", "circular", "mini-player-btn"])
-        self._prev_button.set_size_request(30, 30)
+        self._prev_button.set_css_classes(["flat", "circular", "mini-player-ctrl-btn"])
+        self._prev_button.set_size_request(32, 32)
         self._prev_button.connect("clicked", lambda b: self._player.previous())
-        row2.append(self._prev_button)
+        controls_row.append(self._prev_button)
 
         self._play_button = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
         self._play_button.set_css_classes(["mini-player-play-btn", "circular"])
-        self._play_button.set_size_request(34, 34)
+        self._play_button.set_size_request(38, 38)
         self._play_button.connect("clicked", lambda b: self._player.play_pause())
-        row2.append(self._play_button)
+        controls_row.append(self._play_button)
 
         self._next_button = Gtk.Button.new_from_icon_name("media-skip-forward-symbolic")
-        self._next_button.set_css_classes(["flat", "circular", "mini-player-btn"])
-        self._next_button.set_size_request(30, 30)
+        self._next_button.set_css_classes(["flat", "circular", "mini-player-ctrl-btn"])
+        self._next_button.set_size_request(32, 32)
         self._next_button.connect("clicked", lambda b: self._player.next())
-        row2.append(self._next_button)
+        controls_row.append(self._next_button)
+        
+        right_column.append(controls_row)
+
+        # Progress / Timeline slider
+        progress_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        progress_row.set_valign(Gtk.Align.CENTER)
+
+        self._time_label = Gtk.Label(label="0:00")
+        self._time_label.set_css_classes(["mini-player-time"])
+        progress_row.append(self._time_label)
 
         self._progress_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0.0, 100.0, 0.1
         )
-        self._progress_scale.set_size_request(90, -1)
+        self._progress_scale.set_hexpand(True)
         self._progress_scale.set_draw_value(False)
         self._progress_scale.set_css_classes(["mini-player-scale"])
         self._progress_scale.connect("change-value", self._on_seek)
-        row2.append(self._progress_scale)
+        progress_row.append(self._progress_scale)
 
         self._duration_label = Gtk.Label(label="0:00")
         self._duration_label.set_css_classes(["mini-player-time"])
-        row2.append(self._duration_label)
+        progress_row.append(self._duration_label)
 
-        center_box.append(row2)
-        self._main_box.append(center_box)
+        right_column.append(progress_row)
+        self._main_box.append(right_column)
 
-        # Right: close button
-        right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        right_box.set_valign(Gtk.Align.CENTER)
-        right_box.set_margin_end(8)
-
-        restore_btn = Gtk.Button.new_from_icon_name("go-up-symbolic")
-        restore_btn.set_css_classes(["flat", "circular", "mini-player-btn"])
-        restore_btn.set_size_request(30, 30)
-        restore_btn.set_tooltip_text("Restaurar ventana")
-        restore_btn.connect("clicked", lambda b: self._emit_restore())
-        right_box.append(restore_btn)
-
-        close_btn = Gtk.Button.new_from_icon_name("window-close-symbolic")
-        close_btn.set_css_classes(["flat", "circular", "mini-player-btn"])
-        close_btn.set_size_request(30, 30)
-        close_btn.set_tooltip_text("Cerrar")
-        close_btn.connect("clicked", lambda b: self._emit_restore())
-        right_box.append(close_btn)
-
-        self._main_box.append(right_box)
-
-        self.set_content(self._main_box)
+        # Enable dragging by wrapping content inside WindowHandle
+        handle = Gtk.WindowHandle()
+        handle.set_child(self._main_box)
+        self.set_content(handle)
 
         self._load_base_css()
-
-    def _make_draggable(self, widget):
-        drag = Gtk.GestureDrag()
-        drag.connect("drag-begin", self._on_drag_begin)
-        widget.add_controller(drag)
-
-    def _on_drag_begin(self, gesture, start_x, start_y):
-        surface = self.get_surface()
-        if not surface:
-            return
-        display = self.get_display()
-        timestamp = Gtk.get_current_event_time()
-        button = Gdk.BUTTON_PRIMARY
-        sx, sy = float(start_x), float(start_y)
-        for obj, fn_name, args in [
-            (self, "begin_move_drag", (button, sx, sy, timestamp)),
-            (Gtk.Window, "begin_move_drag", (self, button, sx, sy, timestamp)),
-            (surface, "begin_move", (display, None, button, sx, sy, timestamp)),
-        ]:
-            fn = getattr(obj, fn_name, None)
-            if fn:
-                try:
-                    fn(*args)
-                    return
-                except TypeError:
-                    continue
 
     def _load_base_css(self):
         css = """
         .mini-player {
             background-color: @window_bg_color;
-            border: none;
-            padding: 0;
+            background-image: linear-gradient(135deg, @window_bg_color, mix(@window_bg_color, @window_fg_color, 0.06));
+            border-radius: 16px;
+            border: 1px solid alpha(currentColor, 0.08);
+            transition: background-color 0.6s ease;
         }
         .mini-player-art {
-            border-radius: 4px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
         }
         .mini-player-title {
-            font-weight: bold;
-            font-size: 13px;
+            font-weight: 800;
+            font-size: 15px;
+            transition: color 0.6s ease;
         }
         .mini-player-artist {
-            font-size: 11px;
+            font-size: 12px;
+            font-weight: 500;
+            transition: color 0.6s ease;
         }
         .mini-player-time {
             font-size: 11px;
+            font-weight: bold;
+            transition: color 0.6s ease;
         }
-        .mini-player-btn {
-            opacity: 0.7;
+        .mini-player-win-btn {
+            opacity: 0.5;
+            min-width: 24px;
+            min-height: 24px;
+            padding: 0;
+            transition: opacity 0.2s ease, color 0.6s ease;
         }
-        .mini-player-btn:hover {
+        .mini-player-win-btn:hover {
             opacity: 1.0;
+        }
+        .mini-player-ctrl-btn {
+            opacity: 0.85;
+            min-width: 32px;
+            min-height: 32px;
+            padding: 0;
+            transition: opacity 0.2s ease, color 0.6s ease, transform 0.2s ease;
+        }
+        .mini-player-ctrl-btn:hover {
+            opacity: 1.0;
+            transform: scale(1.08);
         }
         .mini-player-play-btn {
             background-color: @accent_bg_color;
             color: #000000;
             border-radius: 50%;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-            transition: all 0.2s ease;
+            min-width: 38px;
+            min-height: 38px;
+            padding: 0;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+            transition: background-color 0.6s ease, color 0.6s ease, transform 0.2s ease;
         }
         .mini-player-play-btn:hover {
             transform: scale(1.08);
         }
         .mini-player-scale trough {
-            min-height: 3px;
+            min-height: 4px;
             border-radius: 2px;
             background-color: alpha(currentColor, 0.15);
+            transition: background-color 0.6s ease;
         }
         .mini-player-scale highlight {
-            min-height: 3px;
+            min-height: 4px;
             border-radius: 2px;
             background-color: @accent_bg_color;
+            transition: background-color 0.6s ease;
         }
         .mini-player-scale slider {
             min-height: 10px;
             min-width: 10px;
             border-radius: 50%;
             background-color: @accent_bg_color;
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+            transition: background-color 0.6s ease;
         }
         """
         provider = Gtk.CssProvider()
@@ -236,51 +250,62 @@ class MiniPlayer(Adw.Window):
         )
 
     def _update_theme_css(self, bg_hex: str, accent_hex: str, fg_hex: str):
+        # Programmatically mix bg_hex and accent_hex for a rich depth gradient
+        try:
+            r = int(bg_hex[1:3], 16)
+            g = int(bg_hex[3:5], 16)
+            b = int(bg_hex[5:7], 16)
+            ar = int(accent_hex[1:3], 16)
+            ag = int(accent_hex[3:5], 16)
+            ab = int(accent_hex[5:7], 16)
+        except Exception:
+            r, g, b = 29, 185, 84
+            ar, ag, ab = 30, 215, 96
+
+        # Gradient target is 75% dominant mixed with 25% accent, then deepened (80% brightness)
+        r2 = max(0, int((r * 0.75 + ar * 0.25) * 0.80))
+        g2 = max(0, int((g * 0.75 + ag * 0.25) * 0.80))
+        b2 = max(0, int((b * 0.75 + ab * 0.25) * 0.80))
+        color2_hex = f"#{r2:02x}{g2:02x}{b2:02x}"
+
         css = f"""
         .mini-player {{
             background-color: {bg_hex};
+            background-image: linear-gradient(135deg, {bg_hex}, {color2_hex});
         }}
         .mini-player-title {{
             color: {fg_hex};
         }}
         .mini-player-artist {{
-            color: alpha({fg_hex}, 0.7);
+            color: alpha({fg_hex}, 0.75);
         }}
         .mini-player-time {{
             color: alpha({fg_hex}, 0.7);
         }}
-        .mini-player-btn {{
-            color: alpha({fg_hex}, 0.7);
+        .mini-player-win-btn {{
+            color: alpha({fg_hex}, 0.6);
         }}
-        .mini-player-btn:hover {{
+        .mini-player-win-btn:hover {{
+            color: {fg_hex};
+        }}
+        .mini-player-ctrl-btn {{
+            color: alpha({fg_hex}, 0.85);
+        }}
+        .mini-player-ctrl-btn:hover {{
             color: {fg_hex};
         }}
         .mini-player-play-btn {{
             background-color: {accent_hex};
-            color: {fg_hex};
-            border-radius: 50%;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-            transition: all 0.2s ease;
-        }}
-        .mini-player-play-btn:hover {{
-            transform: scale(1.08);
+            color: {bg_hex};
         }}
         .mini-player-scale trough {{
-            min-height: 3px;
-            border-radius: 2px;
-            background-color: alpha({fg_hex}, 0.15);
+            background-color: alpha({fg_hex}, 0.18);
         }}
         .mini-player-scale highlight {{
-            min-height: 3px;
-            border-radius: 2px;
             background-color: {accent_hex};
         }}
         .mini-player-scale slider {{
-            min-height: 10px;
-            min-width: 10px;
-            border-radius: 50%;
             background-color: {accent_hex};
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
         }}
         """
         self._theme_provider.load_from_string(css)
@@ -294,48 +319,41 @@ class MiniPlayer(Adw.Window):
         css = """
         .mini-player {
             background-color: @window_bg_color;
+            background-image: linear-gradient(135deg, @window_bg_color, mix(@window_bg_color, @window_fg_color, 0.06));
         }
         .mini-player-title {
             color: @window_fg_color;
         }
         .mini-player-artist {
-            color: alpha(@window_fg_color, 0.7);
+            color: alpha(@window_fg_color, 0.75);
         }
         .mini-player-time {
             color: alpha(@window_fg_color, 0.7);
         }
-        .mini-player-btn {
-            color: alpha(@window_fg_color, 0.7);
+        .mini-player-win-btn {
+            color: alpha(@window_fg_color, 0.6);
         }
-        .mini-player-btn:hover {
+        .mini-player-win-btn:hover {
+            color: @window_fg_color;
+        }
+        .mini-player-ctrl-btn {
+            color: alpha(@window_fg_color, 0.85);
+        }
+        .mini-player-ctrl-btn:hover {
             color: @window_fg_color;
         }
         .mini-player-play-btn {
             background-color: @accent_bg_color;
             color: @accent_fg_color;
-            border-radius: 50%;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-            transition: all 0.2s ease;
-        }
-        .mini-player-play-btn:hover {
-            transform: scale(1.08);
         }
         .mini-player-scale trough {
-            min-height: 3px;
-            border-radius: 2px;
             background-color: alpha(currentColor, 0.15);
         }
         .mini-player-scale highlight {
-            min-height: 3px;
-            border-radius: 2px;
             background-color: @accent_bg_color;
         }
         .mini-player-scale slider {
-            min-height: 10px;
-            min-width: 10px;
-            border-radius: 50%;
             background-color: @accent_bg_color;
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
         }
         """
         self._theme_provider.load_from_string(css)

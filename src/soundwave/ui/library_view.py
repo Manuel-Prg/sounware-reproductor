@@ -53,9 +53,9 @@ class LibraryView(Gtk.Box):
         self._stack.set_visible_child_name("songs")
 
     PRESET_RULES = [
-        ("Recién Añadido", "Canciones agregadas recientemente", "list-add-symbolic", {"year_min": 2024}),
+        ("Recién Añadido", "Canciones agregadas recientemente", "list-add-symbolic", {"recent": True}),
         ("Favoritos", "Canciones con mejor valoración", "emblem-favorite-symbolic", {"rating_min": 4}),
-        ("Más Escuchadas", "Canciones con más reproducciones", "emblem-important-symbolic", {"play_count_min": 10}),
+        ("Más Escuchadas", "Canciones con más reproducciones", "emblem-important-symbolic", {"most_played": True}),
         ("Jazz", "Canciones del género Jazz", "audio-x-generic-symbolic", {"genre": "Jazz"}),
         ("Rock", "Canciones del género Rock", "audio-x-generic-symbolic", {"genre": "Rock"}),
         ("Electrónica", "Canciones del género Electrónica", "audio-x-generic-symbolic", {"genre": "Electronic"}),
@@ -198,7 +198,28 @@ class LibraryView(Gtk.Box):
             play_btn.connect("clicked", lambda b, r=play_rules: self._on_smart_play(r))
             card.append(play_btn)
 
+            # Make card clickable to show songs in detailed view
+            card_gesture = Gtk.GestureClick()
+            card_gesture.connect("pressed", lambda g, n, x, y, name=name, r=play_rules: self._show_smart_songs(name, r))
+            card.add_controller(card_gesture)
+
             self._smart_flow.append(card)
+
+    def _show_smart_songs(self, name: str, rules: dict):
+        from soundwave.library.smart_playlist import evaluate_rules
+        songs = evaluate_rules(self.db, rules)
+        self._title_label.set_label(name)
+        while True:
+            child = self._songs_list.get_first_child()
+            if child:
+                self._songs_list.remove(child)
+            else:
+                break
+        for s in songs:
+            r = self._build_song_row(s)
+            self._songs_list.append(r)
+        self._stack.set_visible_child_name("songs")
+        self._all_songs = songs
 
     def _on_smart_play(self, rules: dict):
         from soundwave.library.smart_playlist import evaluate_rules
@@ -321,6 +342,32 @@ class LibraryView(Gtk.Box):
         row.set_activatable(True)
         row.set_title(GLib.markup_escape_text(song.display_title))
         row.set_subtitle(GLib.markup_escape_text(f"{song.display_artist} · {song.display_album}"))
+        
+        # Add Favorite toggle button
+        fav_btn = Gtk.Button.new_from_icon_name("emblem-favorite-symbolic")
+        fav_btn.set_valign(Gtk.Align.CENTER)
+        fav_btn.set_css_classes(["flat", "circular"])
+        
+        if song.rating >= 4:
+            fav_btn.add_css_class("song-fav-active")
+        else:
+            fav_btn.add_css_class("song-fav-inactive")
+            
+        def on_fav_clicked(btn, s=song):
+            if s.rating >= 4:
+                self.db.update_rating(s.id, 0)
+                s.rating = 0
+                btn.remove_css_class("song-fav-active")
+                btn.add_css_class("song-fav-inactive")
+            else:
+                self.db.update_rating(s.id, 5)
+                s.rating = 5
+                btn.remove_css_class("song-fav-inactive")
+                btn.add_css_class("song-fav-active")
+                
+        fav_btn.connect("clicked", on_fav_clicked)
+        row.add_suffix(fav_btn)
+
         if song.duration:
             m, s = divmod(int(song.duration), 60)
             row.add_suffix(Gtk.Label(label=f"{m}:{s:02d}"))

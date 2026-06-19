@@ -224,6 +224,24 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             background-color: @accent_bg_color;
             color: @accent_fg_color;
         }
+        .song-fav-active {
+            color: #e02424;
+            opacity: 1.0;
+            background: none !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .song-fav-inactive {
+            color: alpha(currentColor, 0.3);
+            opacity: 0.6;
+            background: none !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .song-fav-inactive:hover {
+            color: alpha(#e02424, 0.7);
+            opacity: 0.9;
+        }
         .song-row {
             border-radius: 8px;
             padding: 8px 16px;
@@ -630,8 +648,6 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._check_scrobble(pos)
 
     def _check_scrobble(self, pos):
-        if not self._lastfm or not self._lastfm.connected:
-            return
         song = self.player.get_current_song()
         if not song or song.id == self._scrobbled_song_id:
             return
@@ -641,10 +657,15 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             return
         half_duration = duration_s / 2
         if current_s >= min(half_duration, 240):
-            self._lastfm.scrobble(
-                song.display_artist, song.display_title,
-                song.display_album, int(song.duration)
-            )
+            # Update local play count and last played timestamp
+            self.db.update_play_count(song.id)
+
+            # Scrobble to Last.fm if connected
+            if self._lastfm and self._lastfm.connected:
+                self._lastfm.scrobble(
+                    song.display_artist, song.display_title,
+                    song.display_album, int(song.duration)
+                )
             self._scrobbled_song_id = song.id
 
     def _on_player_song_changed(self, song: Optional[Song]):

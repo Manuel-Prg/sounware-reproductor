@@ -41,5 +41,48 @@ class TestSoundwaveCore(unittest.TestCase):
             # Si GStreamer no está disponible o falla el inicio en este entorno, saltar
             print(f"Saltando prueba de Player por falta de dependencias del sistema: {e}")
 
+    def test_smart_playlist(self):
+        from soundwave.library.database import Database
+        from soundwave.library.smart_playlist import evaluate_rules
+        import tempfile
+        import shutil
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = Path(temp_dir) / "test.db"
+        try:
+            db = Database(db_path)
+            # Insert some dummy songs
+            db.conn.execute("""
+                INSERT INTO songs (filepath, title, artist, album, genre, year, rating, play_count, added_at)
+                VALUES 
+                ('file1.mp3', 'Song 1', 'Artist A', 'Album X', 'Jazz', 2020, 5, 12, 1000.0),
+                ('file2.mp3', 'Song 2', 'Artist B', 'Album Y', 'Rock', 2021, 3, 5, 2000.0),
+                ('file3.mp3', 'Song 3', 'Artist C', 'Album Z', 'Jazz', 2022, 4, 15, 3000.0)
+            """)
+            db.conn.commit()
+
+            # Test Jazz genre filter (case-insensitive)
+            jazz_songs = evaluate_rules(db, {"genre": "jazz"})
+            self.assertEqual(len(jazz_songs), 2)
+            self.assertEqual(jazz_songs[0].title, "Song 1")
+            self.assertEqual(jazz_songs[1].title, "Song 3")
+
+            # Test Rating filter
+            fav_songs = evaluate_rules(db, {"rating_min": 4})
+            self.assertEqual(len(fav_songs), 2)
+
+            # Test Most Played filter
+            most_played = evaluate_rules(db, {"most_played": True})
+            self.assertEqual(len(most_played), 3)
+            self.assertEqual(most_played[0].title, "Song 3")  # 15 plays
+            self.assertEqual(most_played[1].title, "Song 1")  # 12 plays
+
+            # Test Recent filter
+            recent = evaluate_rules(db, {"recent": True})
+            self.assertEqual(len(recent), 3)
+            self.assertEqual(recent[0].title, "Song 3")  # Added at 3000.0 (latest)
+        finally:
+            shutil.rmtree(temp_dir)
+
 if __name__ == "__main__":
     unittest.main()

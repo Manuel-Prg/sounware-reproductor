@@ -1,4 +1,5 @@
 import gi
+gi.require_version("cairo", "1.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Gdk, Pango
@@ -37,7 +38,18 @@ def hex_to_rgb(hex_str: str) -> tuple[float, float, float]:
         return 0.48, 0.28, 0.98
 
 
-class WaveformProgressBar(Gtk.DrawingArea):
+# Check cairo and overrides availability
+CAIRO_SUPPORTED = False
+try:
+    import cairo
+    import gi.repository.cairo
+    import _gi_cairo
+    CAIRO_SUPPORTED = True
+except (ImportError, ModuleNotFoundError):
+    CAIRO_SUPPORTED = False
+
+
+class WaveformDrawingArea(Gtk.DrawingArea):
     def __init__(self, seek_callback: Optional[Callable[[float], None]] = None):
         super().__init__()
         self._seek_callback = seek_callback
@@ -212,6 +224,65 @@ class WaveformProgressBar(Gtk.DrawingArea):
         cr.arc(x + w - r, y + h - r, r, 0, 0.5 * math.pi)
         cr.arc(x + r, y + h - r, r, 0.5 * math.pi, math.pi)
         cr.close_path()
+
+
+class WaveformProgressBar(Gtk.Box):
+    def __init__(self, seek_callback: Optional[Callable[[float], None]] = None):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._seek_callback = seek_callback
+        self._sensitive = False
+
+        if CAIRO_SUPPORTED:
+            self._drawing_area = WaveformDrawingArea(seek_callback=self._on_internal_seek)
+            self._drawing_area.set_hexpand(True)
+            self._drawing_area.set_valign(Gtk.Align.CENTER)
+            self.append(self._drawing_area)
+            self._scale = None
+        else:
+            self._drawing_area = None
+            self._scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 1.0, 0.001)
+            self._scale.set_draw_value(False)
+            self._scale.set_hexpand(True)
+            self._scale.set_valign(Gtk.Align.CENTER)
+            self._scale.connect("change-value", self._on_scale_change_value)
+            self.append(self._scale)
+
+    def _on_internal_seek(self, progress: float):
+        if self._seek_callback:
+            self._seek_callback(progress)
+
+    def _on_scale_change_value(self, scale, scroll, value):
+        if self._seek_callback:
+            self._seek_callback(value)
+        return False
+
+    def set_sensitive(self, sensitive: bool):
+        self._sensitive = sensitive
+        if self._drawing_area:
+            self._drawing_area.set_sensitive(sensitive)
+        if self._scale:
+            self._scale.set_sensitive(sensitive)
+
+    def get_sensitive(self) -> bool:
+        return self._sensitive
+
+    def set_waveform(self, data: list[float]):
+        if self._drawing_area:
+            self._drawing_area.set_waveform(data)
+
+    def set_progress(self, progress: float):
+        if self._drawing_area:
+            self._drawing_area.set_progress(progress)
+        if self._scale:
+            self._scale.set_value(progress)
+
+    def set_accent_color(self, r: float, g: float, b: float):
+        if self._drawing_area:
+            self._drawing_area.set_accent_color(r, g, b)
+
+    def reset_colors(self):
+        if self._drawing_area:
+            self._drawing_area.reset_colors()
 
 
 class PlayerBar(Gtk.Box):

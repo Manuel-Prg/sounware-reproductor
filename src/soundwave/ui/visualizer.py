@@ -1,4 +1,5 @@
 import gi
+gi.require_version("cairo", "1.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Pango, GLib, Gdk
@@ -28,6 +29,15 @@ def hex_to_rgb(hex_str: str) -> tuple[float, float, float]:
         return 0.1, 0.1, 0.1  # default dark gray
 
 
+CAIRO_SUPPORTED = False
+try:
+    import gi.repository.cairo
+    import _gi_cairo
+    CAIRO_SUPPORTED = True
+except (ImportError, ModuleNotFoundError):
+    CAIRO_SUPPORTED = False
+
+
 class VisualizerView(Gtk.Overlay):
     def __init__(self, db, player):
         super().__init__()
@@ -49,9 +59,17 @@ class VisualizerView(Gtk.Overlay):
 
     def _setup_ui(self):
         # 1. Background drawing area (the visualizer itself)
-        self._drawing_area = Gtk.DrawingArea()
-        self._drawing_area.set_draw_func(self._draw_callback, None)
-        self.set_child(self._drawing_area)
+        if CAIRO_SUPPORTED:
+            self._drawing_area = Gtk.DrawingArea()
+            self._drawing_area.set_draw_func(self._draw_callback, None)
+            self.set_child(self._drawing_area)
+        else:
+            self._drawing_area = None
+            fallback_label = Gtk.Label(label="Visualizador no disponible\n(Instale python3-gi-cairo)")
+            fallback_label.set_justify(Gtk.Justification.CENTER)
+            fallback_label.add_css_class("caption")
+            fallback_label.set_margin_bottom(24)
+            self.set_child(fallback_label)
 
         # 2. Overlay content: centered box
         overlay_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
@@ -240,7 +258,8 @@ class VisualizerView(Gtk.Overlay):
                 self._current_values[i] = max(target, current - decay_rate)
 
         # Trigger redraw
-        self._drawing_area.queue_draw()
+        if self._drawing_area:
+            self._drawing_area.queue_draw()
         return True
 
     def on_show(self):

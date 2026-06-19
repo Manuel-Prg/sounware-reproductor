@@ -7,10 +7,12 @@ original_xdg_config = os.environ.get("XDG_CONFIG_HOME")
 os.environ["XDG_CONFIG_HOME"] = "/nonexistent_dummy_path"
 
 import gi
+gi.require_version("cairo", "1.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gst", "1.0")
 from gi.repository import Gtk, Adw, GLib, Gio
+import gi.repository.cairo
 
 # Restore original XDG_CONFIG_HOME so other modules (like config.py) can resolve user configuration paths.
 if original_xdg_config is not None:

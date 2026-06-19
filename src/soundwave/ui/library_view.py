@@ -40,6 +40,8 @@ class LibraryView(Gtk.Box):
         self.append(self._header)
 
         self._stack = Gtk.Stack()
+        self._stack.set_vexpand(True)
+        self._stack.set_hexpand(True)
         self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.append(self._stack)
 
@@ -157,7 +159,12 @@ class LibraryView(Gtk.Box):
     def _build_visualizer_view(self):
         from soundwave.ui.visualizer import VisualizerView
         self._visualizer_view = VisualizerView(self.db, self.player)
+        self._visualizer_view.connect_play_song(self._on_visualizer_play)
         self._stack.add_named(self._visualizer_view, "visualizer")
+
+    def _on_visualizer_play(self, song: Song, queue: list[Song]):
+        for cb in self._play_song_cbs:
+            cb(song, queue)
 
     def _populate_smart(self):
         clear_container(self._smart_flow)

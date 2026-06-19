@@ -547,11 +547,13 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             dialog.show()
 
     def _start_scan(self, directory: Path):
-        # Guardar la carpeta seleccionada en la configuración para el watcher y futuros escaneos
         from soundwave.library.config import load_settings, save_setting
         settings = load_settings()
         dirs = settings.get("music_directories", [])
-        dir_str = str(directory.resolve())
+        try:
+            dir_str = str(directory.resolve(strict=False))
+        except Exception:
+            dir_str = str(directory)
         if dir_str not in dirs:
             dirs.append(dir_str)
             save_setting("music_directories", dirs)
@@ -565,33 +567,52 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._scan_dialog.present(self)
 
         def scan_task():
-            added, skipped = self.scanner.scan_directories(
-                [directory],
-                progress_cb=lambda done, total, msg: GLib.idle_add(
-                    lambda: self._update_scan_progress(done, total, msg)
+            try:
+                added, skipped = self.scanner.scan_directories(
+                    [directory],
+                    progress_cb=lambda done, total, msg: GLib.idle_add(
+                        lambda d=done, t=total, m=msg: self._update_scan_progress(d, t, m)
+                    )
                 )
-            )
-            GLib.idle_add(lambda: self._on_scan_complete(added, skipped))
+                GLib.idle_add(lambda: self._on_scan_complete(added, skipped))
+            except Exception as e:
+                print(f"[Scan] Error: {e}")
+                GLib.idle_add(lambda: self._on_scan_error(str(e)))
 
         import threading
         thread = threading.Thread(target=scan_task, daemon=True)
         thread.start()
 
     def _update_scan_progress(self, done: int, total: int, msg: str):
-        if done < total:
-            self._scan_dialog.set_body(f"{done}/{total} - {msg}")
+        if done < total and self._scan_dialog:
+            try:
+                self._scan_dialog.set_body(f"{done}/{total} - {msg}")
+            except Exception:
+                pass
         return False
 
     def _on_scan_complete(self, added: int, skipped: int):
-        self._scan_dialog.close()
+        if self._scan_dialog:
+            try:
+                self._scan_dialog.close()
+                self._scan_dialog = None
+            except Exception:
+                pass
         toast = Adw.Toast.new(f"Escaneo completo: {added} canciones añadidas")
         toast.set_timeout(3)
-        if hasattr(self, "_player_bar") and self._player_bar:
-            pass
         self._refresh_library()
         self._show_stats_notification(added)
-        # Reiniciar el watcher para que empiece a vigilar la nueva carpeta y subcarpetas
         self._start_folder_watcher()
+
+    def _on_scan_error(self, error_msg: str):
+        if self._scan_dialog:
+            try:
+                self._scan_dialog.close()
+                self._scan_dialog = None
+            except Exception:
+                pass
+        toast = Adw.Toast.new(f"Error al escanear: {error_msg}")
+        toast.set_timeout(5)
 
     def _show_stats_notification(self, added: int):
         stats = self.db.get_stats()

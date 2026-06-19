@@ -1,4 +1,5 @@
 import os
+import json
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,11 +28,18 @@ class MusicScanner:
         for directory in directories:
             if directory.exists():
                 all_files.extend(self._walk_directory(directory))
+            else:
+                print(f"[Scanner] La carpeta no existe: {directory}")
 
         music_files = [f for f in all_files if is_music_file(f)]
         total = len(music_files)
         added = 0
         skipped = 0
+
+        if total == 0:
+            if progress_cb:
+                progress_cb(0, 0, "No se encontraron archivos de música")
+            return added, skipped
 
         if progress_cb:
             progress_cb(0, total, f"Escaneando {total} archivos...")
@@ -47,7 +55,11 @@ class MusicScanner:
                     executor.shutdown(wait=False)
                     return added, skipped
                 done_count += 1
-                result = future.result()
+                try:
+                    result = future.result(timeout=120)
+                except Exception as e:
+                    print(f"[Scanner] Error procesando archivo: {e}")
+                    result = "skipped"
                 if result == "added":
                     added += 1
                 elif result == "skipped":
@@ -77,7 +89,6 @@ class MusicScanner:
         # Pre-calculate waveform
         try:
             from soundwave.library.waveform_helper import generate_waveform_data
-            import json
             db_song = self.db.get_song(song.id)
             if db_song and not db_song.waveform_data:
                 wave = generate_waveform_data(str(filepath), num_points=150)
@@ -97,17 +108,27 @@ class MusicScanner:
                 removed += 1
         return removed
 
-    def _walk_directory(self, directory: Path) -> list[Path]:
+    def _walk_directory(self, directory: Path, visited: Optional[set[Path]] = None) -> list[Path]:
         files = []
+        if visited is None:
+            visited = set()
+        try:
+            real = directory.resolve(strict=False)
+            if real in visited:
+                return files
+            visited.add(real)
+        except (OSError, RuntimeError):
+            return files
+
         try:
             for entry in os.scandir(str(directory)):
                 if self._cancelled:
                     break
                 try:
-                    if entry.is_file():
+                    if entry.is_file(follow_symlinks=False):
                         files.append(Path(entry.path))
-                    elif entry.is_dir() and not entry.name.startswith("."):
-                        files.extend(self._walk_directory(Path(entry.path)))
+                    elif entry.is_dir(follow_symlinks=False) and not entry.name.startswith("."):
+                        files.extend(self._walk_directory(Path(entry.path), visited))
                 except PermissionError:
                     continue
                 except OSError:
@@ -135,7 +156,6 @@ class MusicScanner:
                 db_song = local_db.get_song(song_id)
                 if db_song and not db_song.waveform_data:
                     from soundwave.library.waveform_helper import generate_waveform_data
-                    import json
                     wave = generate_waveform_data(str(filepath), num_points=150)
                     if wave:
                         local_db.update_song_waveform(song_id, json.dumps(wave))

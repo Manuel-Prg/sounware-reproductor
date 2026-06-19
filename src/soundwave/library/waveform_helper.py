@@ -74,11 +74,16 @@ def generate_waveform_data(filepath: str, num_points: int = 150) -> list[float]:
         
         bus = pipeline.get_bus()
         while True:
-            msg = bus.timed_pop_filtered(Gst.CLOCK_TIME_NONE, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+            # Usar un timeout de 2 segundos para evitar bloqueos si faltan códecs en Ubuntu/WSL
+            msg = bus.timed_pop_filtered(2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
             if msg:
                 if msg.type == Gst.MessageType.ERROR:
                     err, debug = msg.parse_error()
                     print(f"GStreamer Waveform Error for {filepath}: {err} - {debug}", file=sys.stderr)
+                break
+            else:
+                # Se alcanzó el timeout (msg es None)
+                print(f"GStreamer Waveform timeout (posible falta de códecs) para {filepath}", file=sys.stderr)
                 break
                 
         pipeline.set_state(Gst.State.NULL)

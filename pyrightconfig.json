@@ -1,0 +1,8 @@
+{
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": "none",
+  "stubPath": ".venv/lib/python3.12/site-packages"
+}

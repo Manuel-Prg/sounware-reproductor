@@ -72,6 +72,7 @@ class Player:
         self._song_callbacks:     list[SongChangeCallback]  = []
         self._position_callbacks: list[PositionCallback]    = []
         self._eos_callbacks:      list[EosCallback]         = []
+        self._spectrum_callbacks: list[Callable[[list[float]], None]] = []
 
         self._position_timer: Optional[int] = None
 
@@ -110,11 +111,45 @@ class Player:
         self._attach_equalizer()
 
     def _attach_equalizer(self):
-        """Inserta el ecualizador en el pipeline (llamar antes del primer play)."""
+        """Inserta el ecualizador y el espectro en el pipeline (llamar antes del primer play)."""
         if self._equalizer or not self._playbin:
             return
         eq = Gst.ElementFactory.make("equalizer-10bands", "equalizer")
-        if eq:
+        spec = Gst.ElementFactory.make("spectrum", "spectrum")
+
+        if eq and spec:
+            self._equalizer = eq
+            self._spectrum = spec
+
+            # Configure spectrum element
+            spec.set_property("bands", 64)
+            spec.set_property("threshold", -60)
+            spec.set_property("post-messages", True)
+            spec.set_property("message-magnitude", True)
+
+            # Create filter bin to hold equalizer and spectrum
+            filt_bin = Gst.Bin.new("audio-filter-bin")
+            filt_bin.add(eq)
+            filt_bin.add(spec)
+            eq.link(spec)
+
+            # Add ghost pads
+            sink_pad = Gst.GhostPad.new("sink", eq.get_static_pad("sink"))
+            filt_bin.add_pad(sink_pad)
+
+            src_pad = Gst.GhostPad.new("src", spec.get_static_pad("src"))
+            filt_bin.add_pad(src_pad)
+
+            self._playbin.set_property("audio-filter", filt_bin)
+
+            # Aplicar bandas iniciales teniendo en cuenta si está activado
+            bands_to_apply = self._equalizer_bands if self._equalizer_enabled else [0.0] * 10
+            for i, val in enumerate(bands_to_apply):
+                try:
+                    self._equalizer.set_property(f"band{i}", val)
+                except Exception as e:
+                    print(f"Error al aplicar banda {i}: {e}")
+        elif eq:
             self._equalizer = eq
             self._playbin.set_property("audio-filter", self._equalizer)
             # Aplicar bandas iniciales teniendo en cuenta si está activado
@@ -392,12 +427,22 @@ class Player:
     def connect_song(self,     cb: SongChangeCallback):  self._song_callbacks.append(cb)
     def connect_position(self, cb: PositionCallback):    self._position_callbacks.append(cb)
     def connect_eos(self,      cb: EosCallback):         self._eos_callbacks.append(cb)
+    def connect_spectrum(self, cb: Callable[[list[float]], None]): self._spectrum_callbacks.append(cb)
+
+    def disconnect_spectrum(self, cb: Callable[[list[float]], None]):
+        if cb in self._spectrum_callbacks:
+            self._spectrum_callbacks.remove(cb)
+
+    def disconnect_song(self, cb: SongChangeCallback):
+        if cb in self._song_callbacks:
+            self._song_callbacks.remove(cb)
 
     def disconnect_all(self):
         self._state_callbacks.clear()
         self._song_callbacks.clear()
         self._position_callbacks.clear()
         self._eos_callbacks.clear()
+        self._spectrum_callbacks.clear()
 
     # --- Internal ---
 
@@ -433,6 +478,41 @@ class Player:
                     self._set_state(PlayerState.PLAYING)
                 elif new == Gst.State.PAUSED:
                     self._set_state(PlayerState.PAUSED)
+        elif t == Gst.MessageType.ELEMENT:
+            struct = message.get_structure()
+            if struct and struct.get_name() == "spectrum":
+                try:
+                    magnitudes = struct.get_value("magnitude")
+                    if magnitudes:
+                        if hasattr(magnitudes, "get_size"):
+                            m_list = [magnitudes.get_nth(i) for i in range(magnitudes.get_size())]
+                        else:
+                            m_list = list(magnitudes)
+                        self._emit_spectrum(m_list)
+                except TypeError:
+                    # GstValueList fallback: convert structure to string and parse values
+                    struct_str = struct.to_string()
+                    import re
+                    match = re.search(r'magnitude=\(?:[a-zA-Z]+\)?{([^}]+)}', struct_str)
+                    if not match:
+                        match = re.search(r'magnitude={([^}]+)}', struct_str)
+                    if not match:
+                        match = re.search(r'magnitude=\(float\)([-0-9.]+)', struct_str)
+                        if match:
+                            try:
+                                self._emit_spectrum([float(match.group(1))])
+                            except Exception:
+                                pass
+                            return
+                    if match:
+                        try:
+                            m_list = [float(x.strip()) for x in match.group(1).split(',') if x.strip()]
+                            if m_list:
+                                self._emit_spectrum(m_list)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
     def _on_eos(self):
         self._emit_eos()
@@ -456,6 +536,10 @@ class Player:
     def _emit_eos(self):
         for cb in self._eos_callbacks:
             cb()
+
+    def _emit_spectrum(self, magnitudes: list[float]):
+        for cb in self._spectrum_callbacks:
+            cb(magnitudes)
 
     def _start_position_timer(self):
         self._stop_position_timer()

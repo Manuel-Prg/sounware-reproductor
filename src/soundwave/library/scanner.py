@@ -73,6 +73,20 @@ class MusicScanner:
             get_art_path(song.id, self.db)
         except Exception as e:
             print(f"Error pre-cacheando carátula para archivo único: {e}")
+            
+        # Pre-calculate waveform
+        try:
+            from soundwave.library.waveform_helper import generate_waveform_data
+            import json
+            db_song = self.db.get_song(song.id)
+            if db_song and not db_song.waveform_data:
+                wave = generate_waveform_data(str(filepath), num_points=150)
+                if wave:
+                    self.db.update_song_waveform(song.id, json.dumps(wave))
+                    song.waveform_data = json.dumps(wave)
+        except Exception as e:
+            print(f"Error pre-calculando la forma de onda: {e}")
+            
         return song
 
     def remove_missing_files(self) -> int:
@@ -115,6 +129,19 @@ class MusicScanner:
                 get_art_path(song_id, local_db)
             except Exception as e:
                 print(f"Error pre-cacheando carátula en lote: {e}")
+                
+            # Pre-calculate waveform
+            try:
+                db_song = local_db.get_song(song_id)
+                if db_song and not db_song.waveform_data:
+                    from soundwave.library.waveform_helper import generate_waveform_data
+                    import json
+                    wave = generate_waveform_data(str(filepath), num_points=150)
+                    if wave:
+                        local_db.update_song_waveform(song_id, json.dumps(wave))
+            except Exception as e:
+                print(f"Error pre-calculando forma de onda en lote: {e}")
+                
             return "added"
         except Exception:
             return "skipped"

@@ -2,7 +2,7 @@
 Name=Soundwave
 Comment=Reproductor de música moderno para Linux
 Exec=soundwave
-Icon=io.github.soundwave.Soundwave
+Icon=io.github.manuelprz.Soundwave
 Terminal=false
 Type=Application
 Categories=Audio;AudioVideo;Player;

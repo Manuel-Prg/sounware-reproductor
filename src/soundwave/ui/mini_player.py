@@ -13,10 +13,10 @@ from soundwave.library.color_extract import get_theme_colors_from_art
 
 RestoreWindowCallback = Callable[[], None]
 
-_MINI_PLAYER_CSS_PRIORITY = Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10
+_MINI_PLAYER_CSS_PRIORITY = Gtk.STYLE_PROVIDER_PRIORITY_USER
 
 
-class MiniPlayer(Adw.Window):
+class MiniPlayer(Gtk.Window):
     def __init__(self, player: Player):
         super().__init__()
         self._player = player
@@ -26,6 +26,7 @@ class MiniPlayer(Adw.Window):
         self.set_default_size(440, 140)
         self.set_resizable(False)
         self.set_decorated(False)
+        self.add_css_class("mini-player-window")
 
         self._theme_provider = Gtk.CssProvider()
 
@@ -123,6 +124,12 @@ class MiniPlayer(Adw.Window):
         self._next_button.set_size_request(32, 32)
         self._next_button.connect("clicked", lambda b: self._player.next())
         controls_row.append(self._next_button)
+
+        self._repeat_btn = Gtk.Button.new_from_icon_name("media-playlist-repeat-symbolic")
+        self._repeat_btn.set_css_classes(["flat", "circular", "mini-player-ctrl-btn"])
+        self._repeat_btn.set_size_request(32, 32)
+        self._repeat_btn.connect("clicked", self._on_repeat_clicked)
+        controls_row.append(self._repeat_btn)
         
         right_column.append(controls_row)
 
@@ -153,22 +160,49 @@ class MiniPlayer(Adw.Window):
         # Enable dragging by wrapping content inside WindowHandle
         handle = Gtk.WindowHandle()
         handle.set_child(self._main_box)
-        self.set_content(handle)
+        handle.add_css_class("mini-player-handle")
+        self.set_child(handle)
 
         self._load_base_css()
+        self._update_repeat_button_ui()
 
     def _load_base_css(self):
         css = """
+        window.background.mini-player-window,
+        window.csd.mini-player-window,
+        window.mini-player-window,
+        window.mini-player-window > decoration,
+        window.mini-player-window windowhandle,
+        .mini-player-window,
+        .mini-player-window.background,
+        .mini-player-window > contents,
+        .mini-player-window > decoration,
+        .mini-player-window windowhandle,
+        .mini-player-handle {
+            background-color: transparent;
+            background-image: none;
+            background: transparent;
+            box-shadow: none;
+            border: none;
+        }
         .mini-player {
             background-color: @window_bg_color;
             background-image: linear-gradient(135deg, @window_bg_color, mix(@window_bg_color, @window_fg_color, 0.06));
             border-radius: 16px;
             border: 1px solid alpha(currentColor, 0.08);
             transition: background-color 0.6s ease;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        }
+        .mini-player-repeat-active {
+            color: @accent_bg_color;
+            opacity: 1.0;
+        }
+        .mini-player-repeat-inactive {
+            color: alpha(currentColor, 0.45);
+            opacity: 0.6;
         }
         .mini-player-art {
             border-radius: 12px;
-            overflow: hidden;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
         }
         .mini-player-title {
@@ -246,7 +280,7 @@ class MiniPlayer(Adw.Window):
         Gtk.StyleContext.add_provider_for_display(
             self.get_display(),
             provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            _MINI_PLAYER_CSS_PRIORITY
         )
 
     def _update_theme_css(self, bg_hex: str, accent_hex: str, fg_hex: str):
@@ -307,6 +341,14 @@ class MiniPlayer(Adw.Window):
         .mini-player-scale slider {{
             background-color: {accent_hex};
         }}
+        .mini-player-repeat-active {{
+            color: {accent_hex};
+            opacity: 1.0 !important;
+        }}
+        .mini-player-repeat-inactive {{
+            color: alpha({fg_hex}, 0.45);
+            opacity: 0.6;
+        }}
         """
         self._theme_provider.load_from_string(css)
         Gtk.StyleContext.add_provider_for_display(
@@ -355,6 +397,14 @@ class MiniPlayer(Adw.Window):
         .mini-player-scale slider {
             background-color: @accent_bg_color;
         }
+        .mini-player-repeat-active {
+            color: @accent_bg_color;
+            opacity: 1.0 !important;
+        }
+        .mini-player-repeat-inactive {
+            color: alpha(@window_fg_color, 0.45);
+            opacity: 0.6;
+        }
         """
         self._theme_provider.load_from_string(css)
         Gtk.StyleContext.add_provider_for_display(
@@ -383,6 +433,7 @@ class MiniPlayer(Adw.Window):
             self._play_button.set_icon_name("media-playback-start-symbolic")
         if state == PlayerState.STOPPED:
             self._progress_scale.set_value(0)
+        self._update_repeat_button_ui()
 
     def set_artwork_from_path(self, art_path: Optional[Path]):
         if art_path and art_path.exists():
@@ -395,6 +446,7 @@ class MiniPlayer(Adw.Window):
             self._reset_theme()
 
     def _on_song_changed(self, song: Optional[Song]):
+        self._update_repeat_button_ui()
         if song is None:
             self._title_label.set_label("Soundwave")
             self._artist_label.set_label("Sin reproducción")
@@ -409,6 +461,36 @@ class MiniPlayer(Adw.Window):
         self._duration_label.set_label(self._format_time(pos.duration))
         if pos.duration > 0:
             self._progress_scale.set_value((pos.current / pos.duration) * 100)
+
+    def _on_repeat_clicked(self, button):
+        current = self._player.get_repeat_mode()
+        if current == RepeatMode.NONE:
+            self._player.set_repeat_mode(RepeatMode.ALL)
+        elif current == RepeatMode.ALL:
+            self._player.set_repeat_mode(RepeatMode.ONE)
+        else:
+            self._player.set_repeat_mode(RepeatMode.NONE)
+        self._update_repeat_button_ui()
+
+    def _update_repeat_button_ui(self):
+        if not hasattr(self, "_repeat_btn"):
+            return
+        current = self._player.get_repeat_mode()
+        if current == RepeatMode.NONE:
+            self._repeat_btn.set_icon_name("media-playlist-repeat-symbolic")
+            self._repeat_btn.remove_css_class("mini-player-repeat-active")
+            self._repeat_btn.add_css_class("mini-player-repeat-inactive")
+            self._repeat_btn.set_tooltip_text("Modo repetición")
+        elif current == RepeatMode.ALL:
+            self._repeat_btn.set_icon_name("media-playlist-repeat-symbolic")
+            self._repeat_btn.remove_css_class("mini-player-repeat-inactive")
+            self._repeat_btn.add_css_class("mini-player-repeat-active")
+            self._repeat_btn.set_tooltip_text("Repetir todo")
+        elif current == RepeatMode.ONE:
+            self._repeat_btn.set_icon_name("media-playlist-repeat-song-symbolic")
+            self._repeat_btn.remove_css_class("mini-player-repeat-inactive")
+            self._repeat_btn.add_css_class("mini-player-repeat-active")
+            self._repeat_btn.set_tooltip_text("Repetir una")
 
     def connect_restore_window(self, cb: RestoreWindowCallback):
         self._restore_cbs.append(cb)

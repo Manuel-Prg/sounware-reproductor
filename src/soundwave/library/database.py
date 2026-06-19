@@ -34,6 +34,7 @@ class Song:
     rating: int = 0
     replaygain_track_gain: float = 0.0
     replaygain_album_gain: float = 0.0
+    waveform_data: str = ""
 
     @property
     def display_title(self) -> str:
@@ -94,7 +95,8 @@ class Database:
                 last_played REAL,
                 rating INTEGER DEFAULT 0,
                 replaygain_track_gain REAL DEFAULT 0.0,
-                replaygain_album_gain REAL DEFAULT 0.0
+                replaygain_album_gain REAL DEFAULT 0.0,
+                waveform_data TEXT DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS playlists (
@@ -129,6 +131,14 @@ class Database:
                 self.conn.commit()
             except Exception as e:
                 print(f"Error al realizar migración de base de datos para ReplayGain: {e}")
+        try:
+            self.conn.execute("SELECT waveform_data FROM songs LIMIT 1")
+        except sqlite3.OperationalError:
+            try:
+                self.conn.execute("ALTER TABLE songs ADD COLUMN waveform_data TEXT DEFAULT ''")
+                self.conn.commit()
+            except Exception as e:
+                print(f"Error al realizar migración de base de datos para waveform_data: {e}")
         self.conn.commit()
 
     # ---- Songs ----
@@ -137,8 +147,8 @@ class Database:
             INSERT INTO songs (filepath,title,artist,album,album_artist,
                 track_number,disc_number,duration,genre,year,composer,
                 has_embedded_art,art_mime,file_size,modified_at,added_at,
-                replaygain_track_gain,replaygain_album_gain)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                replaygain_track_gain,replaygain_album_gain,waveform_data)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(filepath) DO UPDATE SET
                 title=excluded.title, artist=excluded.artist,
                 album=excluded.album, album_artist=excluded.album_artist,
@@ -149,7 +159,8 @@ class Database:
                 art_mime=excluded.art_mime, file_size=excluded.file_size,
                 modified_at=excluded.modified_at,
                 replaygain_track_gain=excluded.replaygain_track_gain,
-                replaygain_album_gain=excluded.replaygain_album_gain
+                replaygain_album_gain=excluded.replaygain_album_gain,
+                waveform_data=CASE WHEN excluded.waveform_data != '' THEN excluded.waveform_data ELSE songs.waveform_data END
             RETURNING id
         """, (
             song.filepath, song.title, song.artist, song.album,
@@ -157,7 +168,8 @@ class Database:
             song.duration, song.genre, song.year, song.composer,
             int(song.has_embedded_art), song.art_mime,
             song.file_size, song.modified_at, song.added_at,
-            song.replaygain_track_gain, song.replaygain_album_gain
+            song.replaygain_track_gain, song.replaygain_album_gain,
+            song.waveform_data
         ))
         row = cur.fetchone()
         self.conn.commit()
@@ -340,6 +352,10 @@ class Database:
         """).fetchone()
         return dict(stats)
 
+    def update_song_waveform(self, song_id: int, waveform_data: str):
+        self.conn.execute("UPDATE songs SET waveform_data = ? WHERE id = ?", (waveform_data, song_id))
+        self.conn.commit()
+
     # ---- Helpers ----
     def _row_to_song(self, row: sqlite3.Row) -> Song:
         return Song(
@@ -355,7 +371,8 @@ class Database:
             play_count=row["play_count"], last_played=row["last_played"],
             rating=row["rating"],
             replaygain_track_gain=row["replaygain_track_gain"] if "replaygain_track_gain" in row.keys() else 0.0,
-            replaygain_album_gain=row["replaygain_album_gain"] if "replaygain_album_gain" in row.keys() else 0.0
+            replaygain_album_gain=row["replaygain_album_gain"] if "replaygain_album_gain" in row.keys() else 0.0,
+            waveform_data=row["waveform_data"] if "waveform_data" in row.keys() else ""
         )
 
     def close(self):

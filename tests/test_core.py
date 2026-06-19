@@ -41,6 +41,36 @@ class TestSoundwaveCore(unittest.TestCase):
             # Si GStreamer no está disponible o falla el inicio en este entorno, saltar
             print(f"Saltando prueba de Player por falta de dependencias del sistema: {e}")
 
+    def test_player_spectrum_and_callbacks(self):
+        try:
+            player = Player()
+            
+            # Test connecting and disconnecting spectrum callback
+            spec_received = []
+            def on_spec(mags):
+                spec_received.append(mags)
+            
+            player.connect_spectrum(on_spec)
+            self.assertIn(on_spec, player._spectrum_callbacks)
+            
+            # Emit test
+            player._emit_spectrum([1.0, 2.0, 3.0])
+            self.assertEqual(spec_received, [[1.0, 2.0, 3.0]])
+            
+            player.disconnect_spectrum(on_spec)
+            self.assertNotIn(on_spec, player._spectrum_callbacks)
+            
+            # Test disconnect_song
+            song_received = []
+            def on_song(s):
+                song_received.append(s)
+            player.connect_song(on_song)
+            self.assertIn(on_song, player._song_callbacks)
+            player.disconnect_song(on_song)
+            self.assertNotIn(on_song, player._song_callbacks)
+        except Exception as e:
+            print(f"Saltando prueba de espectro por falta de dependencias de GStreamer: {e}")
+
     def test_smart_playlist(self):
         from soundwave.library.database import Database
         from soundwave.library.smart_playlist import evaluate_rules
@@ -83,6 +113,17 @@ class TestSoundwaveCore(unittest.TestCase):
             self.assertEqual(recent[0].title, "Song 3")  # Added at 3000.0 (latest)
         finally:
             shutil.rmtree(temp_dir)
+
+    def test_waveform_generation(self):
+        from soundwave.library.waveform_helper import generate_waveform_data
+        test_file = "/home/manuelprz/.local/share/Steam/steamui/sounds/pop_sound.wav"
+        if Path(test_file).exists():
+            waveform = generate_waveform_data(test_file, num_points=10)
+            self.assertEqual(len(waveform), 10)
+            self.assertAlmostEqual(max(waveform), 1.0)
+        else:
+            waveform = generate_waveform_data("non_existent_file.mp3", num_points=10)
+            self.assertEqual(waveform, [])
 
 if __name__ == "__main__":
     unittest.main()

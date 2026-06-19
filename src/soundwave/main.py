@@ -27,13 +27,14 @@ from soundwave.library.database import Database
 from soundwave.library.lastfm import LastFmScrobbler
 from soundwave.player.engine import Player, PlayerState
 from soundwave.ui.window import SoundwaveWindow
+from soundwave.core.plugin_manager import PluginManager
 
 # Re-override XDG_CONFIG_HOME to a dummy path for the rest of the application lifetime
 # so GTK never loads the custom gtk.css stylesheet during window realization or theme reloads.
 os.environ["XDG_CONFIG_HOME"] = "/nonexistent_dummy_path"
 
 
-APP_ID = "io.github.soundwave.Soundwave"
+APP_ID = "io.github.manuelprz.Soundwave"
 
 
 class SoundwaveApp(Adw.Application):
@@ -47,6 +48,7 @@ class SoundwaveApp(Adw.Application):
         self._window: Optional[SoundwaveWindow] = None
         self._lastfm: Optional[LastFmScrobbler] = None
         self._mpris: Optional[object] = None
+        self._plugin_manager: Optional[PluginManager] = None
 
     def do_activate(self):
         if self._window:
@@ -64,6 +66,10 @@ class SoundwaveApp(Adw.Application):
 
         self._window = SoundwaveWindow(self, self._db, self._player)
         self._window.set_lastfm(self._lastfm)
+
+        # Initialize and load plugins
+        self._plugin_manager = PluginManager(self, self._player, self._db, self._window)
+        self._plugin_manager.load_plugins()
 
         # Start MPRIS
         try:
@@ -99,6 +105,8 @@ class SoundwaveApp(Adw.Application):
         return True
 
     def do_shutdown(self):
+        if self._plugin_manager:
+            self._plugin_manager.shutdown()
         if self._player:
             self._player.destroy()
         if self._db:

@@ -49,6 +49,7 @@ class LibraryView(Gtk.Box):
         self._build_genres_view()
         self._build_search_view()
         self._build_smart_view()
+        self._build_visualizer_view()
 
         self._stack.set_visible_child_name("songs")
 
@@ -152,6 +153,11 @@ class LibraryView(Gtk.Box):
         scrolled.set_child(self._smart_flow)
         self._stack.add_named(scrolled, "smart")
 
+    def _build_visualizer_view(self):
+        from soundwave.ui.visualizer import VisualizerView
+        self._visualizer_view = VisualizerView(self.db, self.player)
+        self._stack.add_named(self._visualizer_view, "visualizer")
+
     def _populate_smart(self):
         while True:
             child = self._smart_flow.get_first_child()
@@ -230,12 +236,16 @@ class LibraryView(Gtk.Box):
 
     # --- Public API ---
     def show_view(self, view_id: str):
+        if hasattr(self, "_visualizer_view") and view_id != "visualizer":
+            self._visualizer_view.on_hide()
+
         self._title_label.set_label({
             "all": "Todas las canciones",
             "albums": "Álbumes",
             "artists": "Artistas",
             "genres": "Géneros",
             "smart": "Listas Inteligentes",
+            "visualizer": "Visualizador",
         }.get(view_id, "Soundwave"))
 
         if view_id == "all":
@@ -253,8 +263,13 @@ class LibraryView(Gtk.Box):
         elif view_id == "smart":
             self._populate_smart()
             self._stack.set_visible_child_name("smart")
+        elif view_id == "visualizer":
+            self._visualizer_view.on_show()
+            self._stack.set_visible_child_name("visualizer")
 
     def show_search_results(self, results: list[Song]):
+        if hasattr(self, "_visualizer_view"):
+            self._visualizer_view.on_hide()
         self._title_label.set_label(f"Resultados: {len(results)}")
         while True:
             child = self._search_list.get_first_child()

@@ -60,12 +60,12 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._main_box.append(self._split_view)
 
         # Player bar at bottom
-        self._player_bar = PlayerBar(player)
+        self._player_bar = PlayerBar(player, db)
         self._player_bar.connect_toggle_mini(self._on_toggle_mini)
         self._player_bar.connect_show_equalizer(self._on_show_equalizer)
         self._player_bar.connect_toggle_fullscreen(self._toggle_fullscreen)
         self._player_bar.connect_toggle_sidebar(self._toggle_sidebar)
-        self._player_bar.connect_navigate_album(self._on_navigate_to_album)
+        self._player_bar.connect_navigate_album(self._on_toggle_visualizer)
         self._player_bar.connect_toggle_lyrics(self._on_toggle_lyrics)
         self._main_box.append(self._player_bar)
 
@@ -682,6 +682,22 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         if self._lyrics_view.get_visible() and song:
             self._lyrics_view.load_song(song)
 
+        if not song and self._current_view == "visualizer":
+            # Switch back to target view (e.g. previous view or "all")
+            target_view = getattr(self, "_previous_view", "all")
+            if target_view == "visualizer":
+                target_view = "all"
+            idx = 0
+            while True:
+                row = self._sidebar_list.get_row_at_index(idx)
+                if not row:
+                    break
+                if getattr(row, "_view_id", "") == target_view:
+                    self._sidebar_list.select_row(row)
+                    self._on_sidebar_row_activated(self._sidebar_list, row)
+                    break
+                idx += 1
+
     # --- Mini player ---
     def _on_toggle_mini(self):
         if self._mini_player.get_visible():
@@ -711,6 +727,31 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         shown = self._split_view.get_show_sidebar()
         self._split_view.set_show_sidebar(not shown)
         self._player_bar.set_sidebar_state(not shown)
+
+    def _on_toggle_visualizer(self):
+        if not self.player.get_current_song():
+            return
+
+        if self._current_view == "visualizer":
+            target_view = getattr(self, "_previous_view", "all")
+            if target_view == "visualizer":
+                target_view = "all"
+
+            idx = 0
+            while True:
+                row = self._sidebar_list.get_row_at_index(idx)
+                if not row:
+                    break
+                if getattr(row, "_view_id", "") == target_view:
+                    self._sidebar_list.select_row(row)
+                    self._on_sidebar_row_activated(self._sidebar_list, row)
+                    break
+                idx += 1
+        else:
+            self._previous_view = self._current_view
+            self._current_view = "visualizer"
+            self._sidebar_list.select_row(None)
+            self._library_view.show_view("visualizer")
 
     # --- Navigation from player bar ---
     def _on_navigate_to_album(self):

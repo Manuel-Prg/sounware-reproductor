@@ -17,25 +17,13 @@ import threading
 
 from soundwave.player.engine import Player, PlayerState, RepeatMode, PlaybackPosition
 from soundwave.library.database import Song, Database
+from soundwave.ui.utils import hex_to_rgb, draw_rounded_rect, format_time
 
 
 ToggleMiniCallback = Callable[[], None]
 ShowEqualizerCallback = Callable[[], None]
 ToggleLyricsCallback = Callable[[], None]
 NavigateAlbumCallback = Callable[[], None]
-
-
-def hex_to_rgb(hex_str: str) -> tuple[float, float, float]:
-    try:
-        hex_str = hex_str.lstrip('#')
-        if len(hex_str) == 3:
-            hex_str = ''.join([c*2 for c in hex_str])
-        r = int(hex_str[0:2], 16) / 255.0
-        g = int(hex_str[2:4], 16) / 255.0
-        b = int(hex_str[4:6], 16) / 255.0
-        return r, g, b
-    except Exception:
-        return 0.48, 0.28, 0.98
 
 
 # Check cairo and overrides availability
@@ -208,22 +196,8 @@ class WaveformDrawingArea(Gtk.DrawingArea):
                 r, g, b, a = self._dim_color
                 cr.set_source_rgba(r, g, b, a)
                 
-            self._draw_rounded_rect(cr, x, y, bar_width, bar_h, bar_width / 2.0)
+            draw_rounded_rect(cr, x, y, bar_width, bar_h, bar_width / 2.0)
             cr.fill()
-
-    def _draw_rounded_rect(self, cr, x, y, w, h, r):
-        if h <= 0:
-            return
-        if r > w / 2.0:
-            r = w / 2.0
-        if r > h / 2.0:
-            r = h / 2.0
-        cr.new_sub_path()
-        cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
-        cr.arc(x + w - r, y + r, r, 1.5 * math.pi, 2 * math.pi)
-        cr.arc(x + w - r, y + h - r, r, 0, 0.5 * math.pi)
-        cr.arc(x + r, y + h - r, r, 0.5 * math.pi, math.pi)
-        cr.close_path()
 
 
 class WaveformProgressBar(Gtk.Box):
@@ -536,13 +510,6 @@ class PlayerBar(Gtk.Box):
     def _on_shuffle_toggled(self, button):
         self._player.toggle_shuffle()
 
-    def _format_time(self, ns: int) -> str:
-        if ns <= 0:
-            return "0:00"
-        total_sec = int(ns / 1e9)
-        m, s = divmod(total_sec, 60)
-        return f"{m}:{s:02d}"
-
     # --- State updates ---
     def _on_state_changed(self, state: PlayerState):
         if state == PlayerState.PLAYING:
@@ -623,8 +590,8 @@ class PlayerBar(Gtk.Box):
             self._progress_scale.set_waveform(wave)
 
     def _on_position_changed(self, pos: PlaybackPosition):
-        self._time_label.set_label(self._format_time(pos.current))
-        self._duration_label.set_label(self._format_time(pos.duration))
+        self._time_label.set_label(format_time(pos.current))
+        self._duration_label.set_label(format_time(pos.duration))
         if pos.duration > 0:
             self._progress_scale.set_progress(pos.current / pos.duration)
 

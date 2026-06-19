@@ -6,6 +6,7 @@ from typing import Optional, Callable
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
+import random
 
 from soundwave.library.database import Song
 
@@ -62,11 +63,12 @@ class Player:
         self._shuffle:   bool       = False
         self._equalizer: Optional[Gst.Element] = None
         
-        # Cargar configuración del ecualizador
+        # Cargar configuración del ecualizador y ReplayGain
         from soundwave.library.config import load_settings
         settings = load_settings()
         self._equalizer_bands: list[float]     = settings.get("equalizer_bands", [0.0] * 10)
         self._equalizer_enabled: bool          = settings.get("equalizer_enabled", True)
+        self._replaygain_mode: str             = settings.get("replaygain_mode", "track")
 
         self._state_callbacks:    list[StateChangeCallback] = []
         self._song_callbacks:     list[SongChangeCallback]  = []
@@ -99,7 +101,7 @@ class Player:
             raise RuntimeError("No se pudo crear playbin/playbin3. Verifica gstreamer1.0-plugins-base.")
 
         self._playbin.set_property("volume", self._volume)
-        self._playbin.set_property("buffer-size", 1024)
+        self._playbin.set_property("buffer-size", 4096)
 
         bus = self._playbin.get_bus()
         bus.add_signal_watch()
@@ -251,12 +253,7 @@ class Player:
         
         factor = 1.0
         if self._current_song:
-            try:
-                from soundwave.library.config import load_settings
-                settings = load_settings()
-                mode = settings.get("replaygain_mode", "track")  # track, album, off
-            except Exception:
-                mode = "track"
+            mode = self._replaygain_mode
 
             if mode == "track":
                 gain = getattr(self._current_song, "replaygain_track_gain", 0.0)
@@ -280,7 +277,6 @@ class Player:
             shuffled = list(songs)
             if shuffled and 0 <= start_index < len(shuffled):
                 current_song = shuffled.pop(start_index)
-                import random
                 random.shuffle(shuffled)
                 shuffled.insert(0, current_song)
                 self._queue = shuffled

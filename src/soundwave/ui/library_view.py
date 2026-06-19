@@ -6,9 +6,10 @@ from gi.repository import Gtk, Adw, Gdk, Pango, GLib
 from pathlib import Path
 from typing import Optional, Callable
 
-from soundwave.library.database import Database, Song
-from soundwave.library.album_art import get_art_path
+from soundwave.library.database import Database, Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
+from soundwave.library.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
 from soundwave.player.engine import Player, PlayerState
+from soundwave.ui.utils import clear_container
 
 
 PlaySongCallback = Callable[[Song, list[Song]], None]
@@ -159,12 +160,7 @@ class LibraryView(Gtk.Box):
         self._stack.add_named(self._visualizer_view, "visualizer")
 
     def _populate_smart(self):
-        while True:
-            child = self._smart_flow.get_first_child()
-            if child:
-                self._smart_flow.remove(child)
-            else:
-                break
+        clear_container(self._smart_flow)
         for name, desc, icon, rules in self.PRESET_RULES:
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             card.set_css_classes(["smart-card"])
@@ -215,12 +211,7 @@ class LibraryView(Gtk.Box):
         from soundwave.library.smart_playlist import evaluate_rules
         songs = evaluate_rules(self.db, rules)
         self._title_label.set_label(name)
-        while True:
-            child = self._songs_list.get_first_child()
-            if child:
-                self._songs_list.remove(child)
-            else:
-                break
+        clear_container(self._songs_list)
         for s in songs:
             r = self._build_song_row(s)
             self._songs_list.append(r)
@@ -271,12 +262,7 @@ class LibraryView(Gtk.Box):
         if hasattr(self, "_visualizer_view"):
             self._visualizer_view.on_hide()
         self._title_label.set_label(f"Resultados: {len(results)}")
-        while True:
-            child = self._search_list.get_first_child()
-            if child:
-                self._search_list.remove(child)
-            else:
-                break
+        clear_container(self._search_list)
         for song in results:
             row = self._build_song_row(song)
             self._search_list.append(row)
@@ -292,52 +278,28 @@ class LibraryView(Gtk.Box):
 
     # --- Populate views ---
     def _populate_songs(self):
-        while True:
-            child = self._songs_list.get_first_child()
-            if child:
-                self._songs_list.remove(child)
-            else:
-                break
-
+        clear_container(self._songs_list)
         self._all_songs = self.db.get_all_songs()
         for i, song in enumerate(self._all_songs):
             row = self._build_song_row(song)
             self._songs_list.append(row)
 
     def _populate_albums(self):
-        while True:
-            child = self._albums_flow.get_first_child()
-            if child:
-                self._albums_flow.remove(child)
-            else:
-                break
-
+        clear_container(self._albums_flow)
         albums = self.db.get_albums()
         for album in albums:
             card = self._build_album_card(album)
             self._albums_flow.append(card)
 
     def _populate_artists(self):
-        while True:
-            child = self._artists_flow.get_first_child()
-            if child:
-                self._artists_flow.remove(child)
-            else:
-                break
-
+        clear_container(self._artists_flow)
         artists = self.db.get_artists()
         for artist in artists:
             card = self._build_artist_card(artist)
             self._artists_flow.append(card)
 
     def _populate_genres(self):
-        while True:
-            child = self._genres_flow.get_first_child()
-            if child:
-                self._genres_flow.remove(child)
-            else:
-                break
-
+        clear_container(self._genres_flow)
         genres = self.db.conn.execute("""
             SELECT 
                 CASE WHEN genre = '' OR genre IS NULL THEN 'Sin género' ELSE genre END as genre,
@@ -397,14 +359,23 @@ class LibraryView(Gtk.Box):
 
         overlay = Gtk.Overlay()
 
-        # Try to find art for this album
+        # Try to find art for this album (check cache first, then DB)
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
         art_texture = None
         for s in songs:
-            art_path = get_art_path(s.id, self.db)
-            if art_path and art_path.exists():
-                art_texture = Gdk.Texture.new_from_filename(str(art_path))
+            for ext in (".jpg", ".png"):
+                cached = ART_CACHE_DIR / f"{s.id}{ext}"
+                if cached.exists():
+                    art_texture = Gdk.Texture.new_from_filename(str(cached))
+                    break
+            if art_texture:
                 break
+        if not art_texture:
+            for s in songs:
+                art_path = get_art_path(s.id, self.db)
+                if art_path and art_path.exists():
+                    art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                    break
 
         avatar = Adw.Avatar(size=120, text=album["album"], show_initials=True)
         if art_texture:
@@ -436,7 +407,7 @@ class LibraryView(Gtk.Box):
         box.append(title)
 
         # Subtitle (Artist)
-        artist_name = album.get("album_artist", "") or "Artista desconocido"
+        artist_name = album.get("album_artist", "") or UNKNOWN_ARTIST
         artist = Gtk.Label(label=artist_name)
         artist.set_ellipsize(Pango.EllipsizeMode.END)
         artist.set_max_width_chars(18)
@@ -555,15 +526,10 @@ class LibraryView(Gtk.Box):
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
         if not songs:
             return
-        album_name = album.get("album", "Álbum desconocido")
+        album_name = album.get("album", UNKNOWN_ALBUM)
         artist_name = album.get("album_artist", "") or songs[0].display_artist
         self._title_label.set_label(f"{album_name}")
-        while True:
-            child = self._songs_list.get_first_child()
-            if child:
-                self._songs_list.remove(child)
-            else:
-                break
+        clear_container(self._songs_list)
         for s in songs:
             r = self._build_song_row(s)
             self._songs_list.append(r)
@@ -577,12 +543,7 @@ class LibraryView(Gtk.Box):
         songs = self.db.get_songs_by_artist(artist_name)
         if songs:
             self._title_label.set_label(artist_name)
-            while True:
-                child = self._songs_list.get_first_child()
-                if child:
-                    self._songs_list.remove(child)
-                else:
-                    break
+            clear_container(self._songs_list)
             for s in songs:
                 r = self._build_song_row(s)
                 self._songs_list.append(r)
@@ -590,18 +551,13 @@ class LibraryView(Gtk.Box):
             self._all_songs = songs
 
     def _on_genre_selected(self, genre: str):
-        if genre == "Sin género":
+        if genre == NO_GENRE:
             songs = [s for s in self.db.get_all_songs() if not s.genre or s.genre.strip() == ""]
         else:
             songs = self.db.search_songs(genre)
         if songs:
             self._title_label.set_label(f"Género: {genre}")
-            while True:
-                child = self._songs_list.get_first_child()
-                if child:
-                    self._songs_list.remove(child)
-                else:
-                    break
+            clear_container(self._songs_list)
             for s in songs:
                 r = self._build_song_row(s)
                 self._songs_list.append(r)

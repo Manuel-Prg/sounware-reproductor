@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import time
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -8,6 +9,11 @@ from typing import Optional
 
 DB_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "soundwave"
 DB_PATH = DB_DIR / "library.db"
+
+UNKNOWN_ARTIST = "Artista desconocido"
+UNKNOWN_ALBUM = "Álbum desconocido"
+VARIOUS_ARTISTS = "Varios artistas"
+NO_GENRE = "Sin género"
 
 
 @dataclass
@@ -42,11 +48,11 @@ class Song:
 
     @property
     def display_artist(self) -> str:
-        return self.artist or "Artista desconocido"
+        return self.artist or UNKNOWN_ARTIST
 
     @property
     def display_album(self) -> str:
-        return self.album or "Álbum desconocido"
+        return self.album or UNKNOWN_ALBUM
 
     def asdict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if k != "id"}
@@ -122,23 +128,21 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_songs_filepath ON songs(filepath);
         """)
         # Migración automática para bases de datos ya existentes
-        try:
-            self.conn.execute("SELECT replaygain_track_gain FROM songs LIMIT 1")
-        except sqlite3.OperationalError:
-            try:
-                self.conn.execute("ALTER TABLE songs ADD COLUMN replaygain_track_gain REAL DEFAULT 0.0")
-                self.conn.execute("ALTER TABLE songs ADD COLUMN replaygain_album_gain REAL DEFAULT 0.0")
-                self.conn.commit()
-            except Exception as e:
-                print(f"Error al realizar migración de base de datos para ReplayGain: {e}")
-        try:
-            self.conn.execute("SELECT waveform_data FROM songs LIMIT 1")
-        except sqlite3.OperationalError:
-            try:
-                self.conn.execute("ALTER TABLE songs ADD COLUMN waveform_data TEXT DEFAULT ''")
-                self.conn.commit()
-            except Exception as e:
-                print(f"Error al realizar migración de base de datos para waveform_data: {e}")
+        existing_cols = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(songs)").fetchall()
+        }
+        migrations = [
+            ("replaygain_track_gain", "REAL DEFAULT 0.0"),
+            ("replaygain_album_gain", "REAL DEFAULT 0.0"),
+            ("waveform_data", "TEXT DEFAULT ''"),
+        ]
+        for col_name, col_type in migrations:
+            if col_name not in existing_cols:
+                try:
+                    self.conn.execute(f"ALTER TABLE songs ADD COLUMN {col_name} {col_type}")
+                except Exception as e:
+                    print(f"Error al migrar columna {col_name}: {e}")
         self.conn.commit()
 
     # ---- Songs ----
@@ -234,8 +238,8 @@ class Database:
         return [dict(r) for r in rows]
 
     def get_songs_by_album(self, album: str, album_artist: str = "") -> list[Song]:
-        db_album = "" if album == "Álbum desconocido" else album
-        db_artist = "" if album_artist in ("Artista desconocido", "Varios artistas", "") else album_artist
+        db_album = "" if album == UNKNOWN_ALBUM else album
+        db_artist = "" if album_artist in (UNKNOWN_ARTIST, VARIOUS_ARTISTS, "") else album_artist
         if db_album == "":
             if db_artist == "":
                 rows = self.conn.execute("""
@@ -255,7 +259,7 @@ class Database:
         return [self._row_to_song(r) for r in rows]
 
     def get_songs_by_artist(self, artist: str) -> list[Song]:
-        db_artist = "" if artist == "Artista desconocido" else artist
+        db_artist = "" if artist == UNKNOWN_ARTIST else artist
         if db_artist == "":
             rows = self.conn.execute("""
                 SELECT * FROM songs WHERE artist = '' OR artist IS NULL
@@ -272,7 +276,7 @@ class Database:
         self.conn.execute("""
             UPDATE songs SET play_count = play_count + 1,
                 last_played = ? WHERE id = ?
-        """, (__import__("time").time(), song_id))
+        """, (time.time(), song_id))
         self.conn.commit()
 
     def update_rating(self, song_id: int, rating: int):
@@ -282,7 +286,7 @@ class Database:
 
     # ---- Playlists ----
     def create_playlist(self, name: str) -> int:
-        now = __import__("time").time()
+        now = time.time()
         cur = self.conn.execute(
             "INSERT INTO playlists (name, created_at, modified_at) VALUES (?, ?, ?)",
             (name, now, now)
@@ -318,7 +322,7 @@ class Database:
             (playlist_id, song_id, max_pos)
         )
         self.conn.execute("UPDATE playlists SET modified_at = ? WHERE id = ?",
-                          (__import__("time").time(), playlist_id))
+                          (time.time(), playlist_id))
         self.conn.commit()
 
     def remove_from_playlist(self, playlist_id: int, song_id: int):
@@ -327,11 +331,11 @@ class Database:
             (playlist_id, song_id)
         )
         self.conn.execute("UPDATE playlists SET modified_at = ? WHERE id = ?",
-                          (__import__("time").time(), playlist_id))
+                          (time.time(), playlist_id))
         self.conn.commit()
 
     def reorder_playlist(self, playlist_id: int, song_ids: list[int]):
-        now = __import__("time").time()
+        now = time.time()
         self.conn.execute("DELETE FROM playlists_songs WHERE playlist_id = ?", (playlist_id,))
         for i, sid in enumerate(song_ids):
             self.conn.execute(

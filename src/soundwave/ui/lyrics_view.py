@@ -9,6 +9,7 @@ from typing import Optional
 
 from soundwave.library.lyrics import get_lyrics, LyricsLine
 from soundwave.library.database import Song
+from soundwave.ui.utils import clear_container
 
 
 class LyricsView(Gtk.Box):
@@ -133,13 +134,7 @@ class LyricsView(Gtk.Box):
         GLib.idle_add(do_scroll)
 
     def _clear_lyrics(self):
-        # Limpiar FlowBox
-        while True:
-            child = self._flow.get_first_child()
-            if child:
-                self._flow.remove(child)
-            else:
-                break
+        clear_container(self._flow)
         self._lyrics = []
         self._labels = []
         self._current_index = -1

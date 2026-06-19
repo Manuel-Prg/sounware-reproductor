@@ -11,8 +11,8 @@ from typing import Optional
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "soundwave"
 CONFIG_FILE = CONFIG_DIR / "lastfm.json"
 
-API_KEY = "d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0"
-API_SECRET = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+API_KEY = os.environ.get("SOUNDWAVE_LASTFM_API_KEY", "")
+API_SECRET = os.environ.get("SOUNDWAVE_LASTFM_API_SECRET", "")
 BASE_URL = "https://ws.audioscrobbler.com/2.0/"
 
 
@@ -32,6 +32,10 @@ class LastFmScrobbler:
     @property
     def connected(self) -> bool:
         return self.session_key is not None
+
+    @property
+    def configured(self) -> bool:
+        return bool(API_KEY and API_SECRET)
 
     def authenticate(self, username: str, password: str) -> bool:
         password_hash = hashlib.md5(password.encode()).hexdigest()

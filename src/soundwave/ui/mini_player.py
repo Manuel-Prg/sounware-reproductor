@@ -9,6 +9,7 @@ from typing import Optional, Callable
 from soundwave.player.engine import Player, PlayerState, RepeatMode, PlaybackPosition
 from soundwave.library.database import Song
 from soundwave.library.color_extract import get_theme_colors_from_art
+from soundwave.ui.utils import format_time
 
 
 RestoreWindowCallback = Callable[[], None]
@@ -419,13 +420,6 @@ class MiniPlayer(Gtk.Window):
             seek_ns = int((value / 100.0) * pos.duration)
             self._player.seek(seek_ns)
 
-    def _format_time(self, ns: int) -> str:
-        if ns <= 0:
-            return "0:00"
-        total_sec = int(ns / 1e9)
-        m, s = divmod(total_sec, 60)
-        return f"{m}:{s:02d}"
-
     def _on_state_changed(self, state: PlayerState):
         if state == PlayerState.PLAYING:
             self._play_button.set_icon_name("media-playback-pause-symbolic")
@@ -457,8 +451,8 @@ class MiniPlayer(Gtk.Window):
         self._artist_label.set_label(song.display_artist)
 
     def _on_position_changed(self, pos: PlaybackPosition):
-        self._time_label.set_label(self._format_time(pos.current))
-        self._duration_label.set_label(self._format_time(pos.duration))
+        self._time_label.set_label(format_time(pos.current))
+        self._duration_label.set_label(format_time(pos.duration))
         if pos.duration > 0:
             self._progress_scale.set_value((pos.current / pos.duration) * 100)
 

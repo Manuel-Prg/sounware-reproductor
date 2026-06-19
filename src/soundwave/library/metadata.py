@@ -1,4 +1,5 @@
 import os
+import re
 import mimetypes
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,29 @@ def is_music_file(path: Path) -> bool:
     return path.suffix.lower() in MUSIC_EXTENSIONS
 
 
+def _detect_embedded_art(mfile, tags: dict) -> tuple[bool, str]:
+    if isinstance(mfile, MP3):
+        if _has_mp3_art(tags):
+            return True, _get_mp3_art_mime(tags)
+    elif isinstance(mfile, FLAC):
+        if mfile.pictures:
+            return True, mfile.pictures[0].mime
+    elif isinstance(mfile, MP4):
+        covr = tags.get("covr", [])
+        if covr:
+            mime_type = _mp4_covr_mime(covr[0])
+            return True, mime_type
+    elif isinstance(mfile, (OggVorbis, OggOpus)):
+        pics = mfile.pictures if hasattr(mfile, "pictures") else []
+        if not pics and hasattr(mfile, "get"):
+            metadata_picture = mfile.get("metadata_block_picture")
+            if metadata_picture:
+                pics = [mutagen.flac.Picture(metadata_picture[0])]
+        if pics:
+            return True, pics[0].mime
+    return False, ""
+
+
 def read_metadata(filepath: str) -> Optional[Song]:
     path = Path(filepath)
     if not path.exists():
@@ -50,30 +74,7 @@ def read_metadata(filepath: str) -> Optional[Song]:
 
     tags = mfile.tags or {}
 
-    if isinstance(mfile, MP3):
-        song.has_embedded_art = _has_mp3_art(tags)
-        if song.has_embedded_art:
-            song.art_mime = _get_mp3_art_mime(tags)
-    elif isinstance(mfile, FLAC):
-        pics = mfile.pictures
-        song.has_embedded_art = len(pics) > 0
-        if song.has_embedded_art:
-            song.art_mime = pics[0].mime
-    elif isinstance(mfile, MP4):
-        covr = tags.get("covr", [])
-        song.has_embedded_art = len(covr) > 0
-        if song.has_embedded_art:
-            mime_type = _mp4_covr_mime(covr[0])
-            song.art_mime = mime_type
-    elif isinstance(mfile, (OggVorbis, OggOpus)):
-        pics = mfile.pictures if hasattr(mfile, "pictures") else []
-        if not pics and hasattr(mfile, "get"):
-            metadata_picture = mfile.get("metadata_block_picture")
-            if metadata_picture:
-                pics = [mutagen.flac.Picture(metadata_picture[0])]
-        song.has_embedded_art = len(pics) > 0
-        if song.has_embedded_art:
-            song.art_mime = pics[0].mime
+    song.has_embedded_art, song.art_mime = _detect_embedded_art(mfile, tags)
 
     title = _get_tag(mfile, "title")
     if title:
@@ -129,7 +130,6 @@ def read_metadata(filepath: str) -> Optional[Song]:
 
         # Limpiar prefijo de número de pista si está en el título (ej: "01 Song Title" -> "Song Title")
         if guessed_title:
-            import re
             guessed_title = re.sub(r"^\d+[\s._-]+", "", guessed_title).strip()
 
         if not song.title and guessed_title:

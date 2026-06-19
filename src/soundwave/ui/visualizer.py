@@ -15,19 +15,7 @@ from pathlib import Path
 from soundwave.library.database import Song
 from soundwave.library.album_art import get_art_path
 from soundwave.library.color_extract import get_theme_colors_from_art
-
-def hex_to_rgb(hex_str: str) -> tuple[float, float, float]:
-    try:
-        hex_str = hex_str.lstrip('#')
-        if len(hex_str) == 3:
-            hex_str = ''.join([c*2 for c in hex_str])
-        r = int(hex_str[0:2], 16) / 255.0
-        g = int(hex_str[2:4], 16) / 255.0
-        b = int(hex_str[4:6], 16) / 255.0
-        return r, g, b
-    except Exception:
-        return 0.1, 0.1, 0.1  # default dark gray
-
+from soundwave.ui.utils import hex_to_rgb, draw_rounded_rect
 
 CAIRO_SUPPORTED = False
 try:
@@ -210,22 +198,8 @@ class VisualizerView(Gtk.Overlay):
             x = spacing + i * (bar_width + spacing)
             y = baseline - bar_h
 
-            self._draw_rounded_rect(cr, x, y, bar_width, bar_h, min(bar_width / 2.0, 4.0))
+            draw_rounded_rect(cr, x, y, bar_width, bar_h, min(bar_width / 2.0, 4.0))
             cr.fill()
-
-    def _draw_rounded_rect(self, cr, x, y, w, h, r):
-        if h <= 0:
-            return
-        if r > w / 2.0:
-            r = w / 2.0
-        if r > h / 2.0:
-            r = h / 2.0
-        cr.new_sub_path()
-        cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
-        cr.arc(x + w - r, y + r, r, 1.5 * math.pi, 2 * math.pi)
-        cr.arc(x + w - r, y + h - r, r, 0, 0.5 * math.pi)
-        cr.arc(x + r, y + h - r, r, 0.5 * math.pi, math.pi)
-        cr.close_path()
 
     def _on_spectrum_data(self, magnitudes: list[float]):
         # Magnitudes are in dB (e.g. -60 to 0). Normalize to 0..1

@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 import requests
@@ -45,10 +46,57 @@ def export_library_to_dict(db) -> dict:
 
     return {
         "version": 1,
-        "exported_at": __import__("time").time(),
+        "exported_at": time.time(),
         "songs": songs,
         "playlists": exported_playlists
     }
+
+
+def _build_song_maps(rows: list) -> tuple[dict, dict]:
+    match_map = {}
+    path_map = {}
+    for r in rows:
+        title_clean = (r["title"] or "").lower().strip()
+        artist_clean = (r["artist"] or "").lower().strip()
+        album_clean = (r["album"] or "").lower().strip()
+        if title_clean or artist_clean:
+            match_map[(title_clean, artist_clean, album_clean)] = r
+        if r["filepath"]:
+            filename = Path(r["filepath"]).name.lower()
+            path_map[filename] = r
+    return match_map, path_map
+
+
+def _merge_song_stats(db, s: dict, match_map: dict, path_map: dict):
+    title = s.get("title", "")
+    artist = s.get("artist", "")
+    album = s.get("album", "")
+    rating = s.get("rating", 0)
+    play_count = s.get("play_count", 0)
+    last_played = s.get("last_played")
+    filepath = s.get("filepath", "")
+
+    key = (title.lower().strip(), artist.lower().strip(), album.lower().strip())
+    matched_row = None
+
+    if title or artist:
+        matched_row = match_map.get(key)
+
+    if not matched_row and filepath:
+        filename = Path(filepath).name.lower()
+        matched_row = path_map.get(filename)
+
+    if matched_row:
+        local_id = matched_row["id"]
+        new_rating = max(matched_row["rating"] or 0, rating or 0)
+        new_play_count = max(matched_row["play_count"] or 0, play_count or 0)
+        new_last_played = matched_row["last_played"]
+        if last_played is not None:
+            if new_last_played is None or last_played > new_last_played:
+                new_last_played = last_played
+        db.conn.execute("""
+            UPDATE songs SET rating = ?, play_count = ?, last_played = ? WHERE id = ?
+        """, (new_rating, new_play_count, new_last_played, local_id))
 
 
 def import_library_from_dict(db, data: dict):
@@ -58,83 +106,19 @@ def import_library_from_dict(db, data: dict):
     if not isinstance(data, dict) or "songs" not in data:
         return
 
-    # Load all current songs into memory for fast O(N) lookup
     local_songs = db.conn.execute(
         "SELECT id, filepath, title, artist, album, play_count, rating, last_played FROM songs"
     ).fetchall()
-    
-    # Matching indexes
-    match_map = {}
-    path_map = {}
-    for r in local_songs:
-        title_clean = (r["title"] or "").lower().strip()
-        artist_clean = (r["artist"] or "").lower().strip()
-        album_clean = (r["album"] or "").lower().strip()
-        
-        # Only index by tag if we have at least title/artist
-        if title_clean or artist_clean:
-            match_map[(title_clean, artist_clean, album_clean)] = r
-            
-        # File name fallback
-        if r["filepath"]:
-            filename = Path(r["filepath"]).name.lower()
-            path_map[filename] = r
+    match_map, path_map = _build_song_maps(local_songs)
 
-    # Merge song stats
     for s in data.get("songs", []):
-        title = s.get("title", "")
-        artist = s.get("artist", "")
-        album = s.get("album", "")
-        rating = s.get("rating", 0)
-        play_count = s.get("play_count", 0)
-        last_played = s.get("last_played")
-        filepath = s.get("filepath", "")
-
-        key = (title.lower().strip(), artist.lower().strip(), album.lower().strip())
-        matched_row = None
-        
-        if title or artist:
-            matched_row = match_map.get(key)
-        
-        if not matched_row and filepath:
-            filename = Path(filepath).name.lower()
-            matched_row = path_map.get(filename)
-
-        if matched_row:
-            local_id = matched_row["id"]
-            
-            # Merge logic: max rating, max play count, latest last played
-            new_rating = max(matched_row["rating"] or 0, rating or 0)
-            new_play_count = max(matched_row["play_count"] or 0, play_count or 0)
-            
-            new_last_played = matched_row["last_played"]
-            if last_played is not None:
-                if new_last_played is None or last_played > new_last_played:
-                    new_last_played = last_played
-
-            db.conn.execute("""
-                UPDATE songs
-                SET rating = ?, play_count = ?, last_played = ?
-                WHERE id = ?
-            """, (new_rating, new_play_count, new_last_played, local_id))
-
+        _merge_song_stats(db, s, match_map, path_map)
     db.conn.commit()
 
-    # Re-cache local songs mapping for playlists
     local_songs = db.conn.execute(
         "SELECT id, filepath, title, artist, album FROM songs"
     ).fetchall()
-    match_map = {}
-    path_map = {}
-    for r in local_songs:
-        title_clean = (r["title"] or "").lower().strip()
-        artist_clean = (r["artist"] or "").lower().strip()
-        album_clean = (r["album"] or "").lower().strip()
-        if title_clean or artist_clean:
-            match_map[(title_clean, artist_clean, album_clean)] = r
-        if r["filepath"]:
-            filename = Path(r["filepath"]).name.lower()
-            path_map[filename] = r
+    match_map, path_map = _build_song_maps(local_songs)
 
     # Rebuild and merge playlists
     existing_playlists = {pl.name: pl for pl in db.get_playlists()}

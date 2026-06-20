@@ -111,7 +111,6 @@ class SettingsDialog(Adw.PreferencesWindow):
         replaygain_row.set_model(replaygain_model)
 
         # Cargar configuración actual de ReplayGain
-        from soundwave.library.config import load_settings
         settings = load_settings()
         current_rg = settings.get("replaygain_mode", "track")
         if current_rg == "off":
@@ -360,3 +359,52 @@ class SettingsDialog(Adw.PreferencesWindow):
             self._show_error("Sincronización completada con éxito.")
         else:
             self._show_error("Error al sincronizar la biblioteca.")
+
+    def _on_batch_art_clicked(self, btn):
+        self.batch_art_btn.set_sensitive(False)
+        self.batch_art_btn.set_label("Buscando...")
+        self.batch_art_row.set_subtitle("Descargando carátulas en segundo plano...")
+
+        # Capture db_path before entering the thread (SQLite connections
+        # cannot be shared across threads)
+        db_path = self.parent_window.db.db_path
+
+        def run_batch():
+            try:
+                from soundwave.library.album_art import get_art_path, download_and_cache_album_art
+                from soundwave.library.database import Database
+                # Open a new, thread-local connection
+                thread_db = Database(db_path)
+                try:
+                    songs = thread_db.get_all_songs()
+                    downloaded = 0
+                    for song in songs:
+                        if song.id is None:
+                            continue
+                        existing = get_art_path(song.id, thread_db)
+                        if existing and existing.exists():
+                            continue
+                        result = download_and_cache_album_art(song.id, thread_db)
+                        if result:
+                            downloaded += 1
+                finally:
+                    thread_db.close()
+                GLib.idle_add(self._on_batch_art_complete, downloaded)
+            except Exception as e:
+                print(f"[Settings] Error en descarga de carátulas: {e}")
+                GLib.idle_add(self._on_batch_art_complete, -1)
+
+        import threading
+        threading.Thread(target=run_batch, daemon=True).start()
+
+    def _on_batch_art_complete(self, downloaded: int):
+        self.batch_art_btn.set_sensitive(True)
+        self.batch_art_btn.set_label("Buscar")
+        if downloaded == -1:
+            self.batch_art_row.set_subtitle("Error al descargar carátulas.")
+        elif downloaded == 0:
+            self.batch_art_row.set_subtitle("Todas las canciones ya tienen carátula.")
+        else:
+            self.batch_art_row.set_subtitle(f"¡Descarga completada! {downloaded} carátula(s) nuevas.")
+            if hasattr(self.parent_window, "_library_view"):
+                GLib.idle_add(self.parent_window._library_view.refresh)

@@ -203,15 +203,20 @@ def extract_embedded_art(filepath: str) -> Optional[bytes]:
 
 
 def find_external_cover(dirpath: Path) -> Optional[Path]:
+    if not dirpath.exists() or not dirpath.is_dir():
+        return None
     for fname in COVER_FILENAMES:
         candidate = dirpath / fname
         if candidate.exists():
             return candidate
-    for f in dirpath.iterdir():
-        if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png"):
-            lower = f.stem.lower()
-            if "cover" in lower or "front" in lower or "folder" in lower or "album" in lower:
-                return f
+    try:
+        for f in dirpath.iterdir():
+            if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                lower = f.stem.lower()
+                if "cover" in lower or "front" in lower or "folder" in lower or "album" in lower:
+                    return f
+    except Exception:
+        pass
     return None
 
 

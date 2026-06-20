@@ -888,10 +888,17 @@ class SoundwaveWindow(Adw.ApplicationWindow):
 
     def _start_art_download_for_song(self, song_id: int):
         import threading
+        db_path = self.db.db_path
+
         def do_download():
             try:
                 from soundwave.library.album_art import download_and_cache_album_art
-                art_path = download_and_cache_album_art(song_id, self.db)
+                from soundwave.library.database import Database
+                thread_db = Database(db_path)
+                try:
+                    art_path = download_and_cache_album_art(song_id, thread_db)
+                finally:
+                    thread_db.close()
                 if art_path and art_path.exists():
                     GLib.idle_add(self._on_art_downloaded_for_song, song_id, art_path)
             except Exception as e:

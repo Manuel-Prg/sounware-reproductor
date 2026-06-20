@@ -77,6 +77,7 @@ class SettingsDialog(Adw.PreferencesWindow):
         art_download_row = Adw.SwitchRow()
         art_download_row.set_title("Descargar carátulas faltantes")
         art_download_row.set_subtitle("Busca y descarga en internet las carátulas de álbumes que no las tengan")
+        # pyrefly: ignore [unbound-name]
         settings = load_settings()
         art_download_row.set_active(settings.get("download_missing_art", False))
 
@@ -359,49 +360,3 @@ class SettingsDialog(Adw.PreferencesWindow):
             self._show_error("Sincronización completada con éxito.")
         else:
             self._show_error("Error al sincronizar la biblioteca.")
-
-    def _on_batch_art_clicked(self, btn):
-        self.batch_art_btn.set_sensitive(False)
-        self.batch_art_btn.set_label("Buscando...")
-        self.batch_art_row.set_subtitle("Descargando carátulas en segundo plano...")
-
-        def run_batch():
-            try:
-                from soundwave.library.album_art import (
-                    get_art_path, download_and_cache_album_art, CACHE_DIR
-                )
-                db = self.parent_window.db
-                songs = db.get_all_songs()
-                downloaded = 0
-                for song in songs:
-                    if song.id is None:
-                        continue
-                    existing = get_art_path(song.id, db)
-                    if existing and existing.exists():
-                        continue
-                    result = download_and_cache_album_art(song.id, db)
-                    if result:
-                        downloaded += 1
-                GLib.idle_add(self._on_batch_art_complete, downloaded)
-            except Exception as e:
-                print(f"[Settings] Error en descarga de carátulas: {e}")
-                GLib.idle_add(self._on_batch_art_complete, -1)
-
-        import threading
-        threading.Thread(target=run_batch, daemon=True).start()
-
-    def _on_batch_art_complete(self, downloaded: int):
-        self.batch_art_btn.set_sensitive(True)
-        self.batch_art_btn.set_label("Buscar")
-        if downloaded == -1:
-            self.batch_art_row.set_subtitle("Error al descargar carátulas.")
-            self._show_error("Ocurrió un error al buscar carátulas.")
-        elif downloaded == 0:
-            self.batch_art_row.set_subtitle("Todas las canciones ya tienen carátula.")
-            self._show_error("No se encontraron nuevas carátulas para descargar.")
-        else:
-            self.batch_art_row.set_subtitle(f"¡Descarga completada!")
-            self._show_error(f"Se descargaron {downloaded} carátula(s) nuevas.")
-            # Refresh the library view artwork
-            if hasattr(self.parent_window, "_library_view"):
-                GLib.idle_add(self.parent_window._library_view.refresh)

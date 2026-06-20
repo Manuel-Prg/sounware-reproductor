@@ -99,6 +99,9 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         self._start_folder_watcher()
         self.connect("destroy", self._on_destroy)
 
+        # Prompt user on first run about auto album art download
+        GLib.idle_add(self._maybe_prompt_art_download)
+
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
         css = """
@@ -266,6 +269,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             border-radius: 50%;
             box-shadow: 0 4px 14px rgba(29, 185, 84, 0.3);
             transition: all 0.2s ease;
+            padding: 0;
         }
         .play-button-main:hover {
             transform: scale(1.08);
@@ -697,11 +701,17 @@ class SoundwaveWindow(Adw.ApplicationWindow):
                 int(song.duration)
             )
         self._library_view.highlight_song(song)
-        art_path = get_art_path(song.id, self.db) if song else None
+        art_path = get_art_path(song.id, self.db) if (song and song.id is not None) else None
         self._player_bar.set_artwork_from_path(art_path)
         self._mini_player.set_artwork_from_path(art_path)
         if self._lyrics_view.get_visible() and song:
             self._lyrics_view.load_song(song)
+
+        # If no cover found and auto-download is enabled, fetch it in the background
+        if song and song.id is not None and art_path is None:
+            from soundwave.library.config import load_settings
+            if load_settings().get("download_missing_art", False):
+                self._start_art_download_for_song(song.id)
 
         if not song and self._current_view == "visualizer":
             # Switch back to target view (e.g. previous view or "all")
@@ -841,3 +851,77 @@ class SoundwaveWindow(Adw.ApplicationWindow):
     def _on_destroy(self, *args):
         if self._watcher:
             self._watcher.stop()
+
+    # ──────────────────────────────────────────────────────────
+    # Album art auto-download
+    # ──────────────────────────────────────────────────────────
+
+    def _maybe_prompt_art_download(self):
+        from soundwave.library.config import load_settings, save_setting
+        settings = load_settings()
+        if "download_missing_art" in settings:
+            return False  # Already configured, no prompt needed
+
+        dialog = Adw.MessageDialog(transient_for=self, modal=True)
+        dialog.set_heading("Descargar carátulas faltantes")
+        dialog.set_body(
+            "¿Deseas que Soundwave busque automáticamente en internet las carátulas "
+            "de álbumes que no las tengan en tus archivos?\n\n"
+            "También puedes activar o desactivar esto más tarde desde Ajustes."
+        )
+        dialog.add_response("no", "No, gracias")
+        dialog.add_response("yes", "Sí, buscar")
+        dialog.set_response_appearance("yes", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("yes")
+        dialog.set_close_response("no")
+
+        def on_response(dialog, response):
+            enabled = response == "yes"
+            save_setting("download_missing_art", enabled)
+            if enabled:
+                self.add_toast("Descarga de carátulas activada. Se buscará al reproducir canciones.")
+            dialog.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+        return False  # Don't repeat
+
+    def _start_art_download_for_song(self, song_id: int):
+        import threading
+        def do_download():
+            try:
+                from soundwave.library.album_art import download_and_cache_album_art
+                art_path = download_and_cache_album_art(song_id, self.db)
+                if art_path and art_path.exists():
+                    GLib.idle_add(self._on_art_downloaded_for_song, song_id, art_path)
+            except Exception as e:
+                print(f"[Window] Error descargando carátula: {e}")
+        threading.Thread(target=do_download, daemon=True).start()
+
+    def _on_art_downloaded_for_song(self, song_id: int, art_path):
+        current_song = self.player.get_current_song()
+        if current_song and current_song.id == song_id:
+            self._player_bar.set_artwork_from_path(art_path)
+            self._mini_player.set_artwork_from_path(art_path)
+            if hasattr(self._library_view, "_visualizer_view"):
+                self._library_view._visualizer_view.update_song(current_song)
+        self._library_view._populate_albums()
+        return False
+
+    def add_toast(self, message: str):
+        toast = Adw.Toast.new(message)
+        toast.set_timeout(4)
+        try:
+            self._library_view._toast_overlay.add_toast(toast)
+        except Exception as e:
+            print(f"[Toast] {message} (no se pudo mostrar: {e})")
+
+    def refresh_current_artwork(self):
+        song = self.player.get_current_song()
+        if song and song.id is not None:
+            from soundwave.library.album_art import get_art_path
+            art_path = get_art_path(song.id, self.db)
+            self._player_bar.set_artwork_from_path(art_path)
+            self._mini_player.set_artwork_from_path(art_path)
+            if hasattr(self._library_view, "_visualizer_view"):
+                self._library_view._visualizer_view.update_song(song)

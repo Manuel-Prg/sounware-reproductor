@@ -1,4 +1,6 @@
 import os
+import urllib.parse
+import requests
 from pathlib import Path
 from typing import Optional
 
@@ -96,6 +98,32 @@ def get_art_path(song_id: int, db: Database) -> Optional[Path]:
                 _export_art_to_tmp(song_id, out_path)
                 return out_path
 
+    return None
+
+
+def download_and_cache_album_art(song_id: int, db: Database) -> Optional[Path]:
+    song = db.get_song(song_id)
+    if not song or not song.artist or not song.album:
+        return None
+
+    query = f"{song.artist} {song.album}"
+    url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=album&limit=1"
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("results"):
+                art_url = data["results"][0].get("artworkUrl100")
+                if art_url:
+                    art_url = art_url.replace("100x100bb.jpg", "600x600bb.jpg")
+                    img_data = requests.get(art_url, timeout=10).content
+                    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    out_path = CACHE_DIR / f"{song_id}.jpg"
+                    out_path.write_bytes(img_data)
+                    _export_art_to_tmp(song_id, out_path)
+                    return out_path
+    except Exception as e:
+        print(f"Error descargando carátula para canción {song_id}: {e}")
     return None
 
 

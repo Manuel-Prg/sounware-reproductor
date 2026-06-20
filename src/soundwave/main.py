@@ -93,9 +93,12 @@ class SoundwaveApp(Adw.Application):
     def _check_scrobble(self) -> bool:
         if not self._lastfm or not self._lastfm.connected:
             return True
+        # pyrefly: ignore [missing-attribute]
         song = self._player.get_current_song()
+        # pyrefly: ignore [missing-attribute]
         state = self._player.get_state()
         if song and state == PlayerState.PLAYING:
+            # pyrefly: ignore [missing-attribute]
             pos = self._player.get_position()
             if pos and pos.duration_seconds > 30:
                 progress = pos.progress

@@ -86,6 +86,11 @@ class LyricsView(Gtk.Box):
             label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             label.set_max_width_chars(40)
             label.set_xalign(0.5)
+            label.set_yalign(0.5)
+            label.set_halign(Gtk.Align.CENTER)
+            label.set_valign(Gtk.Align.CENTER)
+            label.set_justify(Gtk.Justification.CENTER)
+            label.set_hexpand(True)
             label.set_css_classes(["lyrics-line", "lyrics-line-inactive"])
             self._flow.append(label)
             self._labels.append(label)  # guardar referencia directa

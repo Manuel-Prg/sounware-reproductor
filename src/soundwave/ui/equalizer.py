@@ -1,12 +1,18 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, GLib, Gio
 
+from pathlib import Path
 from soundwave.player.engine import Player
 from soundwave.player.equalizer import (
-    BAND_FREQUENCIES, get_preset_names, get_preset,
-    GAIN_MIN, GAIN_MAX, clamp_gain
+    BANDS_BY_MODE, BAND_MODES,
+    get_preset_names, get_preset,
+    GAIN_MIN, GAIN_MAX, clamp_gain, gains_for_engine,
+)
+from soundwave.player.headphone_presets import (
+    get_headphone_preset_names, get_headphone_preset,
+    import_autoeq_file,
 )
 
 
@@ -17,14 +23,23 @@ class EqualizerDialog(Adw.Window):
         self.set_transient_for(parent)
         self.set_modal(True)
         self.set_title("Ecualizador")
-        self.set_default_size(600, 400)
+        self.set_default_size(700, 500)
 
-        self._bands = list(player.get_equalizer_bands())
+        self._band_mode: int = 10           # current number of displayed bands
+        self._bands: list[float] = []       # gains for current mode
         self._sliders: list[Gtk.Scale] = []
         self._labels: list[Gtk.Label] = []
 
+        # Load initial gains (10-band from engine), then convert to default mode
+        engine_gains_10 = list(player.get_equalizer_bands())
+        self._bands = list(engine_gains_10)
+
         self._build_ui()
         self._setup_initial_state()
+
+    # ──────────────────────────────────────────────────────────────
+    # UI construction
+    # ──────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         toolbar_view = Adw.ToolbarView()
@@ -33,12 +48,21 @@ class EqualizerDialog(Adw.Window):
         header = Adw.HeaderBar()
         toolbar_view.add_top_bar(header)
 
-        # Presets dropdown
-        presets = get_preset_names()
-        preset_store = Gtk.StringList.new(presets)
-        self._preset_dropdown = Gtk.DropDown(model=preset_store)
-        self._preset_dropdown.connect("notify::selected", self._on_preset_changed)
-        header.set_title_widget(self._preset_dropdown)
+        # Band-mode selector
+        mode_labels = ["3 bandas", "5 bandas", "10 bandas", "15 bandas", "31 bandas"]
+        mode_store = Gtk.StringList.new(mode_labels)
+        self._mode_dropdown = Gtk.DropDown(model=mode_store)
+        self._mode_dropdown.set_selected(BAND_MODES.index(self._band_mode))
+        self._mode_dropdown.set_tooltip_text("Número de bandas del ecualizador")
+        self._mode_dropdown.connect("notify::selected", self._on_mode_changed)
+        header.pack_start(self._mode_dropdown)
+
+        # Import AutoEQ button
+        import_btn = Gtk.Button()
+        import_btn.set_icon_name("document-open-symbolic")
+        import_btn.set_tooltip_text("Importar perfil AutoEQ (.txt)")
+        import_btn.connect("clicked", self._on_import_autoeq)
+        header.pack_end(import_btn)
 
         # Reset button
         reset_btn = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
@@ -46,33 +70,95 @@ class EqualizerDialog(Adw.Window):
         reset_btn.connect("clicked", self._on_reset)
         header.pack_end(reset_btn)
 
-        # Main content
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
+        # ── Main scroll container ──
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroll.set_vexpand(True)
 
-        # Sliders box (horizontal)
-        sliders_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        sliders_box.set_hexpand(True)
-        sliders_box.set_halign(Gtk.Align.CENTER)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        outer.set_margin_top(12)
+        outer.set_margin_bottom(12)
+        outer.set_margin_start(12)
+        outer.set_margin_end(12)
 
-        for i, (freq_name, freq_hz) in enumerate(BAND_FREQUENCIES):
+        # Genre presets dropdown
+        presets_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        presets_box.set_halign(Gtk.Align.CENTER)
+        presets_box.append(Gtk.Label(label="Preset:"))
+        presets = get_preset_names()
+        preset_store = Gtk.StringList.new(["Personalizado"] + presets)
+        self._preset_dropdown = Gtk.DropDown(model=preset_store)
+        self._preset_dropdown.connect("notify::selected", self._on_preset_changed)
+        presets_box.append(self._preset_dropdown)
+        outer.append(presets_box)
+
+        # Headphone presets dropdown
+        hp_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        hp_box.set_halign(Gtk.Align.CENTER)
+        hp_box.append(Gtk.Label(label="Audífonos:"))
+        self._hp_dropdown = Gtk.DropDown()
+        self._hp_dropdown.connect("notify::selected", self._on_headphone_preset_changed)
+        hp_box.append(self._hp_dropdown)
+        delete_btn = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        delete_btn.set_tooltip_text("Eliminar preset de audífonos")
+        delete_btn.connect("clicked", self._on_delete_headphone_preset)
+        hp_box.append(delete_btn)
+        outer.append(hp_box)
+        self._refresh_hp_dropdown()
+
+        # ── Sliders ──
+        self._sliders_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._sliders_box.set_hexpand(True)
+        self._sliders_box.set_halign(Gtk.Align.CENTER)
+        outer.append(self._sliders_box)
+        self._rebuild_sliders()
+
+        # Enable toggle
+        toggle_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        toggle_box.set_margin_top(8)
+        toggle_box.set_halign(Gtk.Align.CENTER)
+        self._enable_switch = Gtk.Switch()
+        self._enable_switch.set_active(True)
+        toggle_box.append(self._enable_switch)
+        toggle_box.append(Gtk.Label(label="Activar ecualizador"))
+        outer.append(toggle_box)
+
+        scroll.set_child(outer)
+        toolbar_view.set_content(scroll)
+
+    # ──────────────────────────────────────────────────────────────
+    # Slider management
+    # ──────────────────────────────────────────────────────────────
+
+    def _rebuild_sliders(self):
+        """Clear and rebuild sliders for the current band mode."""
+        child = self._sliders_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._sliders_box.remove(child)
+            child = nxt
+        self._sliders.clear()
+        self._labels.clear()
+
+        freqs = BANDS_BY_MODE[self._band_mode]
+        n = len(freqs)
+        # Ensure self._bands has the right length
+        if len(self._bands) != n:
+            self._bands = [0.0] * n
+
+        for i, (freq_name, _) in enumerate(freqs):
             band_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            band_box.set_size_request(50, -1)
+            band_box.set_size_request(max(30, min(50, 600 // n)), -1)
 
-            # Value label
             value_label = Gtk.Label(label=f"{self._bands[i]:+.1f}")
             value_label.set_css_classes(["caption"])
             band_box.append(value_label)
             self._labels.append(value_label)
 
-            # Vertical slider
             slider = Gtk.Scale.new_with_range(
                 Gtk.Orientation.VERTICAL, GAIN_MIN, GAIN_MAX, 0.5
             )
-            slider.set_size_request(40, 200)
+            slider.set_size_request(-1, 200)
             slider.set_inverted(True)
             slider.set_draw_value(False)
             slider.set_value(self._bands[i])
@@ -82,76 +168,198 @@ class EqualizerDialog(Adw.Window):
             band_box.append(slider)
             self._sliders.append(slider)
 
-            # Frequency label
             freq_label = Gtk.Label(label=freq_name)
             freq_label.set_css_classes(["caption"])
+            freq_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
             band_box.append(freq_label)
 
-            sliders_box.append(band_box)
+            self._sliders_box.append(band_box)
 
-        box.append(sliders_box)
+    def _refresh_hp_dropdown(self):
+        names = get_headphone_preset_names()
+        hp_store = Gtk.StringList.new(["Ninguno"] + names)
+        self._hp_dropdown.set_model(hp_store)
+        self._hp_dropdown.set_selected(0)
 
-        # Enable toggle
-        toggle_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        toggle_box.set_margin_top(12)
-        toggle_box.set_halign(Gtk.Align.CENTER)
+    # ──────────────────────────────────────────────────────────────
+    # Signal handlers
+    # ──────────────────────────────────────────────────────────────
 
-        self._enable_switch = Gtk.Switch()
-        self._enable_switch.set_active(True)
-        toggle_box.append(self._enable_switch)
-        toggle_box.append(Gtk.Label(label="Activar ecualizador"))
-
-        box.append(toggle_box)
-
-        toolbar_view.set_content(box)
+    def _on_mode_changed(self, dropdown, pspec):
+        idx = dropdown.get_selected()
+        new_mode = BAND_MODES[idx]
+        if new_mode == self._band_mode:
+            return
+        # Convert current bands to new mode via 10-band round-trip
+        from soundwave.player.equalizer import _interpolate_gains
+        src_freqs = [f for _, f in BANDS_BY_MODE[self._band_mode]]
+        dst_freqs = [f for _, f in BANDS_BY_MODE[new_mode]]
+        self._bands = _interpolate_gains(src_freqs, self._bands, dst_freqs)
+        self._bands = [round(clamp_gain(g), 2) for g in self._bands]
+        self._band_mode = new_mode
+        self._rebuild_sliders()
 
     def _on_slider_changed(self, slider, scroll, value):
         i = slider._band_index
         self._bands[i] = clamp_gain(value)
         self._labels[i].set_label(f"{value:+.1f}")
-        self._player.set_equalizer_bands(self._bands)
-        self._preset_dropdown.set_selected(-1)
+        self._player.set_equalizer_bands(self._bands, self._band_mode)
+        # Deselect presets
+        self._preset_dropdown.set_selected(0)
+        self._hp_dropdown.set_selected(0)
 
-    def _on_preset_changed(self, dropdown, param):
+    def _on_preset_changed(self, dropdown, pspec):
         selected = dropdown.get_selected()
-        presets = get_preset_names()
-        if 0 <= selected < len(presets):
-            self._bands = list(get_preset(presets[selected]))
-            for i, slider in enumerate(self._sliders):
-                slider.set_value(self._bands[i])
-                self._labels[i].set_label(f"{self._bands[i]:+.1f}")
-            self._player.set_equalizer_bands(self._bands)
+        if selected == 0:
+            return  # "Personalizado"
+        names = get_preset_names()
+        name = names[selected - 1]
+        self._bands = get_preset(name, self._band_mode)
+        self._apply_bands_to_sliders()
+        self._player.set_equalizer_bands(self._bands, self._band_mode)
+        self._hp_dropdown.set_selected(0)
+
+    def _on_headphone_preset_changed(self, dropdown, pspec):
+        selected = dropdown.get_selected()
+        if selected == 0:
+            return  # "Ninguno"
+        names = get_headphone_preset_names()
+        if selected - 1 >= len(names):
+            return
+        name = names[selected - 1]
+        gains_stored = get_headphone_preset(name)  # stored as any-length
+        if gains_stored is None:
+            return
+        # Resample to current mode
+        from soundwave.player.equalizer import _interpolate_gains, BANDS_10
+        stored_n = len(gains_stored)
+        if stored_n in BANDS_BY_MODE:
+            src_freqs = [f for _, f in BANDS_BY_MODE[stored_n]]
+        else:
+            src_freqs = [f for _, f in BANDS_10]
+        dst_freqs = [f for _, f in BANDS_BY_MODE[self._band_mode]]
+        self._bands = [round(clamp_gain(g), 2)
+                       for g in _interpolate_gains(src_freqs, gains_stored, dst_freqs)]
+        self._apply_bands_to_sliders()
+        self._player.set_equalizer_bands(self._bands, self._band_mode)
+        self._preset_dropdown.set_selected(0)
+
+    def _on_delete_headphone_preset(self, btn):
+        selected = self._hp_dropdown.get_selected()
+        if selected == 0:
+            return
+        names = get_headphone_preset_names()
+        if selected - 1 >= len(names):
+            return
+        name = names[selected - 1]
+        from soundwave.player.headphone_presets import delete_headphone_preset
+        delete_headphone_preset(name)
+        self._refresh_hp_dropdown()
 
     def _on_reset(self, button):
-        self._bands = [0.0] * 10
+        self._bands = [0.0] * self._band_mode
+        # Ensure length matches
+        self._bands = [0.0] * len(BANDS_BY_MODE[self._band_mode])
+        self._apply_bands_to_sliders()
+        self._player.set_equalizer_bands(self._bands, self._band_mode)
+        self._preset_dropdown.set_selected(0)
+        self._hp_dropdown.set_selected(0)
+
+    def _on_import_autoeq(self, btn):
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog.new()
+            dialog.set_title("Importar perfil AutoEQ")
+            f = Gtk.FileFilter()
+            f.set_name("Archivos de texto AutoEQ (*.txt)")
+            f.add_pattern("*.txt")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(f)
+            dialog.set_filters(filters)
+
+            def on_file(dialog, result):
+                try:
+                    file = dialog.open_finish(result)
+                    if file:
+                        self._do_import_autoeq(Path(file.get_path()))
+                except GLib.Error:
+                    pass
+            dialog.open(self, None, on_file)
+        else:
+            chooser = Gtk.FileChooserNative.new(
+                "Importar perfil AutoEQ", self,
+                Gtk.FileChooserAction.OPEN, "Importar", "Cancelar"
+            )
+            f = Gtk.FileFilter()
+            f.set_name("Archivos de texto (*.txt)")
+            f.add_pattern("*.txt")
+            chooser.add_filter(f)
+            self._chooser = chooser
+
+            def on_response(dlg, resp):
+                if resp == Gtk.ResponseType.ACCEPT:
+                    file = dlg.get_file()
+                    if file:
+                        self._do_import_autoeq(Path(file.get_path()))
+                self._chooser = None
+            chooser.connect("response", on_response)
+            chooser.show()
+
+    def _do_import_autoeq(self, filepath: Path):
+        preset_name = filepath.stem  # Use filename (without .txt) as preset name
+        target_freqs = [f for _, f in BANDS_BY_MODE[self._band_mode]]
+        try:
+            gains = import_autoeq_file(str(filepath), preset_name, target_freqs)
+            self._bands = [round(clamp_gain(g), 2) for g in gains]
+            self._apply_bands_to_sliders()
+            self._player.set_equalizer_bands(self._bands, self._band_mode)
+            self._refresh_hp_dropdown()
+            # Select the newly imported preset
+            names = get_headphone_preset_names()
+            if preset_name in names:
+                self._hp_dropdown.set_selected(names.index(preset_name) + 1)
+            self._preset_dropdown.set_selected(0)
+        except Exception as e:
+            print(f"[EQ] Error importando AutoEQ: {e}")
+            toast = Adw.Toast.new(f"Error al importar: {e}")
+            toast.set_timeout(4)
+            # Show a simple dialog instead
+            info = Adw.MessageDialog(transient_for=self, modal=True)
+            info.set_heading("Error al importar")
+            info.set_body(str(e))
+            info.add_response("ok", "OK")
+            info.present()
+
+    # ──────────────────────────────────────────────────────────────
+    # Helpers
+    # ──────────────────────────────────────────────────────────────
+
+    def _apply_bands_to_sliders(self):
         for i, slider in enumerate(self._sliders):
-            slider.set_value(0.0)
-            self._labels[i].set_label("0.0")
-        self._player.set_equalizer_bands(self._bands)
-        self._preset_dropdown.set_selected(-1)
+            if i < len(self._bands):
+                slider.set_value(self._bands[i])
+                self._labels[i].set_label(f"{self._bands[i]:+.1f}")
 
     def _setup_initial_state(self):
         enabled = self._player.get_equalizer_enabled()
         self._enable_switch.set_active(enabled)
         self._enable_switch.connect("state-set", self._on_enable_toggled)
+        self._set_controls_sensitive(enabled)
 
-        # Configurar sensitividad inicial de los controles
-        for slider in self._sliders:
-            slider.set_sensitive(enabled)
-        self._preset_dropdown.set_sensitive(enabled)
-
-        # Intentar seleccionar el preset correspondiente si coincide con las bandas actuales
+        # Try to match a preset
         presets = get_preset_names()
-        for idx, preset_name in enumerate(presets):
-            if list(get_preset(preset_name)) == self._bands:
-                # Desconectar temporalmente el manejador para evitar bucles si es necesario,
-                # pero ya que los valores coinciden, no cambiarán el estado audible.
-                self._preset_dropdown.set_selected(idx)
+        for idx, name in enumerate(presets):
+            if get_preset(name, self._band_mode) == self._bands:
+                self._preset_dropdown.set_selected(idx + 1)
                 break
+
+    def _set_controls_sensitive(self, sensitive: bool):
+        for slider in self._sliders:
+            slider.set_sensitive(sensitive)
+        self._preset_dropdown.set_sensitive(sensitive)
+        self._hp_dropdown.set_sensitive(sensitive)
+        self._mode_dropdown.set_sensitive(sensitive)
 
     def _on_enable_toggled(self, switch, state):
         self._player.set_equalizer_enabled(state)
-        for slider in self._sliders:
-            slider.set_sensitive(state)
-        self._preset_dropdown.set_sensitive(state)
+        self._set_controls_sensitive(state)
         return False

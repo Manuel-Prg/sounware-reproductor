@@ -1,13 +1,13 @@
 import gi
-gi.require_version("cairo", "1.0")
+try:
+    gi.require_version("cairo", "1.0")
+    import cairo
+except (ValueError, ImportError):
+    cairo = None
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Pango, GLib, Gdk
-import cairo
-try:
-    import gi.repository.cairo
-except ImportError:
-    pass
 import math
 from typing import Optional, Callable
 from pathlib import Path
@@ -22,12 +22,25 @@ PlaySongCallback = Callable[[Song, list[Song]], None]
 
 
 CAIRO_SUPPORTED = False
-try:
-    import gi.repository.cairo
-    import _gi_cairo
-    CAIRO_SUPPORTED = True
-except (ImportError, ModuleNotFoundError):
-    CAIRO_SUPPORTED = False
+if cairo is not None:
+    try:
+        import gi.repository.cairo
+        CAIRO_SUPPORTED = True
+    except (ImportError, ModuleNotFoundError):
+        CAIRO_SUPPORTED = False
+def extract_main_artist(artist_name: str) -> str:
+    if not artist_name:
+        return ""
+    # Normalize common feat / ft / collaboration separators
+    delimiters = [
+        " feat.", " feat ", " ft.", " ft ", " featuring ", " FEAT.", " FEAT ", " FT.", " FT ",
+        " & ", " / ", " vs.", " vs ", ", ", " Feat.", " Feat "
+    ]
+    main = artist_name
+    for delim in delimiters:
+        if delim in main:
+            main = main.split(delim)[0]
+    return main.strip()
 
 
 class VisualizerView(Gtk.Overlay):
@@ -43,6 +56,7 @@ class VisualizerView(Gtk.Overlay):
         self._timer_id = None
         self._is_visible = False
         self._show_discography = False
+        self._visualizer_mode = 0  # 0: Bars, 1: Wave, 2: Blocks, 3: Radial
 
         self._bg_color = (0.05, 0.05, 0.05)
         self._accent_color = (0.11, 0.73, 0.33)
@@ -51,30 +65,65 @@ class VisualizerView(Gtk.Overlay):
         self._setup_ui()
 
     def _setup_ui(self):
+        self._dynamic_css_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            # pyrefly: ignore [bad-argument-type]
+            Gdk.Display.get_default(),
+            self._dynamic_css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 11
+        )
+
+        bg_click_gesture = Gtk.GestureClick()
+        bg_click_gesture.connect("pressed", self._on_bg_clicked)
+
         if CAIRO_SUPPORTED:
             self._drawing_area = Gtk.DrawingArea()
             self._drawing_area.set_draw_func(self._draw_callback, None)
+            self._drawing_area.add_controller(bg_click_gesture)
             self.set_child(self._drawing_area)
+            self._update_theme_colors()
         else:
+            # pyrefly: ignore [bad-assignment]
             self._drawing_area = None
-            bg_box = Gtk.Box()
-            bg_box.set_css_classes(["visualizer-bg"])
-            self._no_viz_label = Gtk.Label(
-                label="Espectro no disponible (instale python3-gi-cairo)",
-                css_classes=["caption"]
-            )
-            self._no_viz_label.set_halign(Gtk.Align.END)
-            self._no_viz_label.set_valign(Gtk.Align.END)
-            self._no_viz_label.set_margin_end(12)
-            self._no_viz_label.set_margin_bottom(12)
-            bg_box.append(self._no_viz_label)
+            bg_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            bg_box.set_css_classes(["visualizer-bg", "visualizer-fallback-bg"])
+            bg_box.set_vexpand(True)
+            bg_box.set_hexpand(True)
+            bg_box.add_controller(bg_click_gesture)
+            
+            self._bars_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            self._bars_container.set_valign(Gtk.Align.END)
+            self._bars_container.set_vexpand(True)
+            self._bars_container.set_hexpand(True)
+            self._bars_container.set_margin_bottom(16)
+            self._bars_container.set_margin_start(16)
+            self._bars_container.set_margin_end(16)
+            
+            self._bar_widgets = []
+            for i in range(64):
+                bar_wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                bar_wrapper.set_valign(Gtk.Align.END)
+                bar_wrapper.set_vexpand(True)
+                bar_wrapper.set_hexpand(True)
+                
+                bar_fill = Gtk.Box()
+                bar_fill.set_halign(Gtk.Align.CENTER)
+                bar_fill.add_css_class(f"visualizer-bar-{i}")
+                
+                bar_wrapper.append(bar_fill)
+                self._bars_container.append(bar_wrapper)
+                self._bar_widgets.append(bar_fill)
+                
+            bg_box.append(self._bars_container)
             self.set_child(bg_box)
+            self._update_theme_colors()
 
         overlay_scroll = Gtk.ScrolledWindow()
         overlay_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         overlay_scroll.set_halign(Gtk.Align.FILL)
         overlay_scroll.set_valign(Gtk.Align.FILL)
         overlay_scroll.set_vexpand(True)
+        overlay_scroll.set_margin_bottom(120)
 
         overlay_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         overlay_box.set_halign(Gtk.Align.CENTER)
@@ -86,6 +135,8 @@ class VisualizerView(Gtk.Overlay):
         self._art_picture.set_content_fit(Gtk.ContentFit.CONTAIN)
         self._art_picture.set_css_classes(["album-cover", "visualizer-art"])
         self._art_picture.set_halign(Gtk.Align.CENTER)
+        self._art_picture.set_hexpand(False)
+        self._art_picture.set_vexpand(False)
         overlay_box.append(self._art_picture)
 
         labels_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -134,6 +185,8 @@ class VisualizerView(Gtk.Overlay):
             border-radius: 16px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             background-color: #242424;
+            width: 220px;
+            height: 220px;
         }
         .visualizer-title {
             font-size: 20pt;
@@ -150,44 +203,83 @@ class VisualizerView(Gtk.Overlay):
             color: #ffffff;
         }
         .discography-section {
-            background-color: rgba(0, 0, 0, 0.45);
-            border-radius: 12px;
-            padding: 8px;
+            background-color: rgba(18, 18, 18, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            transition: all 0.3s ease;
         }
-        .discography-header {
+        .discography-album-col {
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 10px;
+        }
+        .discography-header-icon {
+            color: #ffffff;
+            opacity: 0.9;
+        }
+        .discography-header-title {
             font-size: 11pt;
             font-weight: bold;
-            color: rgba(255, 255, 255, 0.85);
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-            padding: 4px 0;
-        }
-        .discography-album {
-            font-size: 10pt;
-            color: rgba(255, 255, 255, 0.8);
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-            padding: 3px 8px;
-            border-radius: 6px;
-        }
-        .discography-album:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        .discography-song {
-            font-size: 9pt;
-            color: rgba(255, 255, 255, 0.65);
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-            padding: 2px 8px;
-            border-radius: 4px;
-        }
-        .discography-song:hover {
-            background-color: rgba(255, 255, 255, 0.08);
             color: #ffffff;
         }
-        .discography-song-current {
+        .discography-header-subtitle {
+            font-size: 8.5pt;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        .discography-listbox {
+            background-color: transparent;
+            border-radius: 12px;
+        }
+        .discography-album-icon {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .discography-album-title {
+            font-size: 9.5pt;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.9);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding-bottom: 4px;
+        }
+        .discography-song-row {
+            background-color: transparent;
+            border-radius: 8px;
+            margin: 2px 0;
+            transition: background-color 0.15s ease;
+        }
+        .discography-song-row:hover {
+            background-color: rgba(255, 255, 255, 0.07);
+        }
+        .discography-song-icon {
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .discography-song-title {
+            font-size: 9pt;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        .discography-song-duration {
+            font-size: 8.5pt;
+            color: rgba(255, 255, 255, 0.45);
+        }
+        .discography-song-row-current {
+            background-color: rgba(255, 255, 255, 0.08);
+        }
+        .discography-song-icon-current {
+            color: #1db954;
+        }
+        .discography-song-title-current {
+            color: #1db954;
+            font-weight: bold;
+        }
+        .discography-song-duration-current {
             color: #1db954;
         }
         """
         css_provider.load_from_data(css.encode("utf-8"))
         Gtk.StyleContext.add_provider_for_display(
+            # pyrefly: ignore [bad-argument-type]
             Gdk.Display.get_default(),
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10
@@ -206,9 +298,24 @@ class VisualizerView(Gtk.Overlay):
         if not self._current_artist:
             return
 
-        songs = self.db.get_songs_by_artist(self._current_artist)
+        main_artist = extract_main_artist(self._current_artist)
+        if not main_artist:
+            return
+
+        # Fetch all songs in the database and filter by main artist
+        all_songs = self.db.get_all_songs()
+        songs = []
+        for s in all_songs:
+            s_main = extract_main_artist(s.artist)
+            s_album_main = extract_main_artist(s.album_artist)
+            if s_main == main_artist or s_album_main == main_artist:
+                songs.append(s)
+
         if not songs:
             return
+
+        # Sort the list by album, disc_number, track_number
+        songs.sort(key=lambda s: (s.album or "", s.disc_number or 1, s.track_number or 0))
 
         albums: dict[str, list[Song]] = {}
         for s in songs:
@@ -220,38 +327,249 @@ class VisualizerView(Gtk.Overlay):
         current_song = self._player.get_current_song()
         current_id = current_song.id if current_song else None
 
-        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        num_albums = len(albums)
+
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         section.set_css_classes(["discography-section"])
         section.set_halign(Gtk.Align.CENTER)
 
-        header = Gtk.Label(label=f"Discografía de {self._current_artist}")
-        header.set_css_classes(["discography-header"])
-        section.append(header)
+        # Dynamic size request based on number of columns
+        if num_albums == 1:
+            section.set_size_request(450, -1)
+            max_cols = 1
+        elif num_albums == 2:
+            section.set_size_request(760, -1)
+            max_cols = 2
+        else:
+            section.set_size_request(1000, -1)
+            max_cols = 3
+
+        # Header Box (Icon + Title + Subtitle)
+        header_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        header_box.set_margin_top(6)
+        header_box.set_margin_bottom(6)
+        header_box.set_margin_start(10)
+        header_box.set_margin_end(10)
+
+        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title_row.set_halign(Gtk.Align.START)
+        
+        art_icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+        art_icon.set_pixel_size(14)
+        art_icon.add_css_class("discography-header-icon")
+        title_row.append(art_icon)
+
+        title_lbl = Gtk.Label(label=f"Discografía de {main_artist}")
+        title_lbl.add_css_class("discography-header-title")
+        title_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        title_lbl.set_max_width_chars(45)
+        title_row.append(title_lbl)
+        header_box.append(title_row)
+
+        sub_lbl = Gtk.Label(label=f"{num_albums} álbumes · {len(songs)} canciones")
+        sub_lbl.add_css_class("discography-header-subtitle")
+        sub_lbl.set_xalign(0)
+        sub_lbl.set_margin_start(22)
+        header_box.append(sub_lbl)
+        
+        section.append(header_box)
+
+        # Grid containing the album columns
+        grid = Gtk.Grid()
+        grid.set_column_spacing(12)
+        grid.set_row_spacing(12)
+        grid.set_column_homogeneous(True)
+        grid.set_hexpand(True)
+
+        col = 0
+        row_idx = 0
 
         for album_name, album_songs in albums.items():
-            album_label = Gtk.Label(label=album_name)
-            album_label.set_css_classes(["discography-album"])
-            album_label.set_xalign(0)
-            section.append(album_label)
+            album_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            album_col.add_css_class("discography-album-col")
+            album_col.set_valign(Gtk.Align.START)
+            album_col.set_hexpand(True)
+
+            # Album header inside the column
+            album_header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            album_header_box.set_margin_top(6)
+            album_header_box.set_margin_bottom(4)
+            album_header_box.set_margin_start(8)
+            album_header_box.set_margin_end(8)
+
+            album_icon = Gtk.Image.new_from_icon_name("media-optical-symbolic")
+            album_icon.set_pixel_size(14)
+            album_icon.add_css_class("discography-album-icon")
+            album_header_box.append(album_icon)
+
+            album_lbl = Gtk.Label(label=album_name)
+            album_lbl.add_css_class("discography-album-title")
+            album_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            album_lbl.set_xalign(0)
+            album_header_box.append(album_lbl)
+
+            album_col.append(album_header_box)
+
+            # ListBox for the songs in this album
+            listbox = Gtk.ListBox()
+            listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+            listbox.add_css_class("discography-listbox")
 
             for s in album_songs:
-                song_label = Gtk.Label(label=GLib.markup_escape_text(s.display_title))
-                song_label.set_xalign(0)
-                song_label.set_css_classes(["discography-song"])
-                if s.id == current_id:
-                    song_label.add_css_class("discography-song-current")
-                song_label.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-                song_gesture = Gtk.GestureClick()
-                song_gesture.connect("pressed", lambda g, n, x, y, song=s, all_songs=songs: self._on_disco_song_clicked(song, all_songs))
-                song_label.add_controller(song_gesture)
-                section.append(song_label)
+                song_row = Gtk.ListBoxRow()
+                song_row.add_css_class("discography-song-row")
+                is_current = (s.id == current_id)
+                if is_current:
+                    song_row.add_css_class("discography-song-row-current")
 
+                song_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                song_box.set_margin_top(4)
+                song_box.set_margin_bottom(4)
+                song_box.set_margin_start(10)
+                song_box.set_margin_end(8)
+
+                # Icon
+                if is_current:
+                    song_icon = Gtk.Image.new_from_icon_name("audio-volume-high-symbolic")
+                    song_icon.add_css_class("discography-song-icon-current")
+                else:
+                    song_icon = Gtk.Image.new_from_icon_name("audio-x-generic-symbolic")
+                    song_icon.add_css_class("discography-song-icon")
+                song_icon.set_pixel_size(12)
+                song_box.append(song_icon)
+
+                # Title
+                song_lbl = Gtk.Label(label=GLib.markup_escape_text(s.display_title))
+                song_lbl.set_xalign(0)
+                song_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+                song_lbl.set_hexpand(True)
+                song_lbl.add_css_class("discography-song-title")
+                if is_current:
+                    song_lbl.add_css_class("discography-song-title-current")
+                song_box.append(song_lbl)
+
+                # Duration
+                if s.duration:
+                    m, sec = divmod(int(s.duration), 60)
+                    dur_lbl = Gtk.Label(label=f"{m}:{sec:02d}")
+                    dur_lbl.add_css_class("discography-song-duration")
+                    if is_current:
+                        dur_lbl.add_css_class("discography-song-duration-current")
+                    song_box.append(dur_lbl)
+
+                song_row.set_child(song_box)
+                song_row.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+                
+                row_gesture = Gtk.GestureClick()
+                row_gesture.connect("pressed", lambda g, n, x, y, song=s, all_songs=songs: self._on_disco_song_clicked(song, all_songs))
+                song_row.add_controller(row_gesture)
+
+                listbox.append(song_row)
+
+            album_col.append(listbox)
+            grid.attach(album_col, col, row_idx, 1, 1)
+
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row_idx += 1
+
+        section.append(grid)
         self._discography_box.append(section)
         self._discography_box.show()
 
     def _on_disco_song_clicked(self, song: Song, all_songs: list[Song]):
         for cb in self._play_song_cbs:
             cb(song, all_songs)
+
+    def _update_theme_colors(self):
+        css_parts = []
+        ar, ag, ab = self._accent_color
+        ri, gi, bi = int(ar * 255), int(ag * 255), int(ab * 255)
+
+        css_parts.append(f"""
+        .discography-song-title-current,
+        .discography-song-duration-current,
+        .discography-song-icon-current {{
+            color: rgb({ri}, {gi}, {bi}) !important;
+        }}
+        .discography-song-row-current {{
+            background-color: rgba({ri}, {gi}, {bi}, 0.12) !important;
+        }}
+        .discography-song-row-current:hover {{
+            background-color: rgba({ri}, {gi}, {bi}, 0.18) !important;
+        }}
+        """)
+
+        if not CAIRO_SUPPORTED:
+            bg_r, bg_g, bg_b = self._bg_color
+            r1, g1, b1 = int(bg_r * 0.15 * 255), int(bg_g * 0.15 * 255), int(bg_b * 0.15 * 255)
+            css_parts.append(f"""
+            .visualizer-fallback-bg {{
+                background: linear-gradient(to bottom, rgb({r1}, {g1}, {b1}), #080808);
+            }}
+            """)
+            
+            num_bars = len(self._current_values)
+            fr, fg, fb = self._fg_color
+            for i in range(num_bars):
+                half = (num_bars - 1) / 2.0
+                if half > 0:
+                    t = 1.0 - abs(i - half) / half
+                else:
+                    t = 0.0
+                
+                r = ar + (fr - ar) * t
+                g = ag + (fg - ag) * t
+                b = ab + (fb - ab) * t
+                
+                bri, bgi, bbi = int(r * 255), int(g * 255), int(b * 255)
+                css_parts.append(f"""
+                .visualizer-bar-{i} {{
+                    background-color: rgb({bri}, {bgi}, {bbi});
+                    border-radius: 3px;
+                }}
+                """)
+                
+        css_data = "\n".join(css_parts)
+        self._dynamic_css_provider.load_from_data(css_data.encode("utf-8"))
+
+    def _update_fallback_bars(self):
+        if not hasattr(self, "_bar_widgets") or not self._bar_widgets:
+            return
+        
+        container_width = self.get_width()
+        container_height = self.get_height()
+        if container_height <= 0:
+            container_height = 300
+        if container_width <= 0:
+            container_width = 800
+            
+        spacing = 4
+        bar_width = int((container_width - spacing * 63) / 64)
+        if bar_width < 1:
+            bar_width = 1
+        elif bar_width > 12:
+            bar_width = 12
+            
+        max_h = min(container_height * 0.20, 100.0)
+        
+        # Adjust wrapper valigns depending on mode (0: Bottom, 1: Center, 2: Top)
+        for i, bar_fill in enumerate(self._bar_widgets):
+            parent = bar_fill.get_parent()
+            if parent:
+                if self._visualizer_mode == 0:
+                    parent.set_valign(Gtk.Align.END)
+                elif self._visualizer_mode == 1:
+                    parent.set_valign(Gtk.Align.CENTER)
+                else:
+                    parent.set_valign(Gtk.Align.START)
+
+            val = self._current_values[i]
+            bar_h = val * max_h
+            if bar_h < 2.0:
+                bar_h = 2.0
+            bar_fill.set_size_request(bar_width, int(bar_h))
 
     def update_song(self, song: Optional[Song]):
         if not song:
@@ -265,13 +583,14 @@ class VisualizerView(Gtk.Overlay):
             if self._show_discography:
                 self._show_discography = False
                 self._discography_revealer.set_reveal_child(False)
+            self._update_theme_colors()
             return
 
         self._title_label.set_text(song.display_title)
         self._artist_label.set_text(song.display_artist)
         self._current_artist = song.display_artist
 
-        art_path = get_art_path(song.id, self.db)
+        art_path = get_art_path(song.id, self.db) if song.id is not None else None
         if art_path and art_path.exists():
             self._art_picture.set_filename(str(art_path))
             try:
@@ -287,10 +606,21 @@ class VisualizerView(Gtk.Overlay):
             self._accent_color = (0.11, 0.73, 0.33)
             self._fg_color = (0.8, 0.8, 0.8)
 
+        self._update_theme_colors()
+
         if self._show_discography:
             self._populate_discography()
 
+    def _on_bg_clicked(self, gesture, n_press, x, y):
+        if CAIRO_SUPPORTED:
+            self._visualizer_mode = (self._visualizer_mode + 1) % 4
+            self._drawing_area.queue_draw()
+        else:
+            self._visualizer_mode = (self._visualizer_mode + 1) % 3
+            self._update_fallback_bars()
+
     def _draw_callback(self, area, cr, width, height, user_data):
+        # pyrefly: ignore [missing-attribute]
         bg_pat = cairo.LinearGradient(0, 0, 0, height)
         r, g, b = self._bg_color
         bg_pat.add_color_stop_rgb(0, r * 0.15, g * 0.15, b * 0.15)
@@ -303,32 +633,125 @@ class VisualizerView(Gtk.Overlay):
         if num_bars == 0:
             return
 
+        ar, ag, ab = self._accent_color
+        fr, fg, fb = self._fg_color
+
+        if self._visualizer_mode == 3:
+            # Mode 3: Radial / Circular spectrum surrounding the album art in the center
+            cx = width / 2.0
+            cy = height / 2.0
+            r_base = 145.0  # Base radius (larger than the 220px album cover which is 110px radius)
+            
+            # Source gradient for radial lines
+            # pyrefly: ignore [missing-attribute]
+            pat = cairo.LinearGradient(0, 0, width, height)
+            pat.add_color_stop_rgb(0.0, ar, ag, ab)
+            pat.add_color_stop_rgb(0.5, fr, fg, fb)
+            pat.add_color_stop_rgb(1.0, ar, ag, ab)
+            cr.set_source(pat)
+            
+            # Setup line cap and width
+            bar_width = (2.0 * math.pi * r_base) / num_bars * 0.6
+            if bar_width < 2.0:
+                bar_width = 2.0
+            cr.set_line_width(bar_width)
+            # pyrefly: ignore [missing-attribute]
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            
+            max_h = 70.0  # Max length of the pulsing radial lines
+            
+            for i in range(num_bars):
+                val = self._current_values[i]
+                h = val * max_h
+                if h < 2.0:
+                    h = 2.0
+                # Distribute bars in a complete circle
+                theta = i * (2.0 * math.pi / num_bars) - (math.pi / 2.0)
+                cos_t = math.cos(theta)
+                sin_t = math.sin(theta)
+                
+                x1 = cx + r_base * cos_t
+                y1 = cy + r_base * sin_t
+                x2 = cx + (r_base + h) * cos_t
+                y2 = cy + (r_base + h) * sin_t
+                
+                cr.move_to(x1, y1)
+                cr.line_to(x2, y2)
+                cr.stroke()
+            return
+
+        # Modes 0, 1, 2: Horizontal layouts
         spacing = 4
         bar_width = (width - spacing * (num_bars + 1)) / num_bars
         if bar_width < 1.0:
             bar_width = 1.0
 
+        # pyrefly: ignore [missing-attribute]
         pat = cairo.LinearGradient(0, 0, width, 0)
-        ar, ag, ab = self._accent_color
-        fr, fg, fb = self._fg_color
         pat.add_color_stop_rgb(0.0, ar, ag, ab)
         pat.add_color_stop_rgb(0.5, fr, fg, fb)
         pat.add_color_stop_rgb(1.0, ar, ag, ab)
-
         cr.set_source(pat)
 
-        max_h = height * 0.35
+        max_h = min(height * 0.20, 100.0)
         baseline = height - 16
 
-        for i in range(num_bars):
-            val = self._current_values[i]
-            bar_h = val * max_h
-            if bar_h < 2.0:
-                bar_h = 2.0
-            x = spacing + i * (bar_width + spacing)
-            y = baseline - bar_h
-            draw_rounded_rect(cr, x, y, bar_width, bar_h, min(bar_width / 2.0, 4.0))
-            cr.fill()
+        if self._visualizer_mode == 1:
+            # Mode 1: Continuous Wave
+            cr.new_path()
+            # Start at left baseline
+            cr.move_to(0, baseline)
+            for i in range(num_bars):
+                val = self._current_values[i]
+                bar_h = val * max_h
+                x = spacing + i * (bar_width + spacing) + bar_width / 2.0
+                y = baseline - bar_h
+                cr.line_to(x, y)
+            # End at right baseline
+            cr.line_to(width, baseline)
+            cr.close_path()
+            
+            # Fill with a nice alpha gradient
+            # pyrefly: ignore [missing-attribute]
+            fill_pat = cairo.LinearGradient(0, baseline - max_h, 0, baseline)
+            fill_pat.add_color_stop_rgba(0.0, ar, ag, ab, 0.55)
+            fill_pat.add_color_stop_rgba(1.0, ar, ag, ab, 0.0)
+            cr.set_source(fill_pat)
+            cr.fill_preserve()
+            
+            # Stroke outline
+            cr.set_source(pat)
+            cr.set_line_width(3.0)
+            # pyrefly: ignore [missing-attribute]
+            cr.set_line_join(cairo.LINE_JOIN_ROUND)
+            cr.stroke()
+
+        elif self._visualizer_mode == 2:
+            # Mode 2: Digital LED Blocks
+            block_h = 4.0
+            block_spacing = 2.0
+            for i in range(num_bars):
+                val = self._current_values[i]
+                bar_h = val * max_h
+                num_blocks = int(bar_h / (block_h + block_spacing))
+                if num_blocks < 1:
+                    num_blocks = 1
+                x = spacing + i * (bar_width + spacing)
+                for b in range(num_blocks):
+                    y = baseline - b * (block_h + block_spacing) - block_h
+                    draw_rounded_rect(cr, x, y, bar_width, block_h, 1.0)
+                    cr.fill()
+        else:
+            # Mode 0: Rounded Vertical Bars
+            for i in range(num_bars):
+                val = self._current_values[i]
+                bar_h = val * max_h
+                if bar_h < 2.0:
+                    bar_h = 2.0
+                x = spacing + i * (bar_width + spacing)
+                y = baseline - bar_h
+                draw_rounded_rect(cr, x, y, bar_width, bar_h, min(bar_width / 2.0, 4.0))
+                cr.fill()
 
     def _on_spectrum_data(self, magnitudes: list[float]):
         threshold = -60.0
@@ -360,6 +783,8 @@ class VisualizerView(Gtk.Overlay):
                 self._current_values[i] = max(target, current - decay_rate)
         if self._drawing_area:
             self._drawing_area.queue_draw()
+        else:
+            self._update_fallback_bars()
         return True
 
     def on_show(self):
@@ -376,6 +801,8 @@ class VisualizerView(Gtk.Overlay):
         self._player.disconnect_song(self.update_song)
         self._current_values = [0.0] * 64
         self._target_values = [0.0] * 64
+        if not self._drawing_area:
+            self._update_fallback_bars()
         if self._show_discography:
             self._show_discography = False
             self._discography_revealer.set_reveal_child(False)

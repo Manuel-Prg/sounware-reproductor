@@ -1,7 +1,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, Pango, GLib
+from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio
 
 from pathlib import Path
 from typing import Optional, Callable
@@ -43,7 +43,12 @@ class LibraryView(Gtk.Box):
         self._stack.set_vexpand(True)
         self._stack.set_hexpand(True)
         self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.append(self._stack)
+
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(self._stack)
+        self._toast_overlay.set_vexpand(True)
+        self._toast_overlay.set_hexpand(True)
+        self.append(self._toast_overlay)
 
         # Views
         self._build_songs_view()
@@ -379,7 +384,7 @@ class LibraryView(Gtk.Box):
                 break
         if not art_texture:
             for s in songs:
-                art_path = get_art_path(s.id, self.db)
+                art_path = get_art_path(s.id, self.db) if s.id is not None else None
                 if art_path and art_path.exists():
                     art_texture = Gdk.Texture.new_from_filename(str(art_path))
                     break
@@ -422,9 +427,10 @@ class LibraryView(Gtk.Box):
         artist.add_css_class("album-card-subtitle")
         box.append(artist)
 
-        # Click handler - play album
+        # Click handler - play album (left click) or context menu (right click)
         gesture = Gtk.GestureClick()
-        gesture.connect("pressed", lambda g, n, x, y, a=album: self._on_album_clicked(a))
+        gesture.set_button(0)  # Listen to all mouse buttons
+        gesture.connect("pressed", lambda g, n, x, y, a=album: self._on_album_card_pressed(g, n, x, y, a))
         box.add_controller(gesture)
 
         return box
@@ -438,7 +444,7 @@ class LibraryView(Gtk.Box):
         songs = self.db.get_songs_by_artist(artist["artist"])
         art_texture = None
         for s in songs:
-            art_path = get_art_path(s.id, self.db)
+            art_path = get_art_path(s.id, self.db) if s.id is not None else None
             if art_path and art_path.exists():
                 art_texture = Gdk.Texture.new_from_filename(str(art_path))
                 break
@@ -587,3 +593,116 @@ class LibraryView(Gtk.Box):
 
     def connect_queue_song(self, cb: QueueSongCallback):
         self._queue_song_cbs.append(cb)
+
+    def _on_album_card_pressed(self, gesture, n_press, x, y, album):
+        button = gesture.get_current_button()
+        if button == 1:  # Left click
+            self._on_album_clicked(album)
+        elif button == 3:  # Right click
+            self._show_album_context_menu(gesture, album)
+
+    def _show_album_context_menu(self, gesture, album):
+        popover = Gtk.Popover()
+        popover.set_parent(gesture.get_widget())
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        
+        play_btn = Gtk.Button(label="Reproducir álbum")
+        play_btn.set_has_frame(False)
+        play_btn.set_halign(Gtk.Align.START)
+        play_btn.connect("clicked", lambda b: (popover.popdown(), self._on_album_clicked(album)))
+        box.append(play_btn)
+
+        change_cover_btn = Gtk.Button(label="Cambiar carátula...")
+        change_cover_btn.set_has_frame(False)
+        change_cover_btn.set_halign(Gtk.Align.START)
+        change_cover_btn.connect("clicked", lambda b: (popover.popdown(), self._prompt_custom_cover(album)))
+        box.append(change_cover_btn)
+
+        popover.set_child(box)
+        popover.popup()
+
+    def _prompt_custom_cover(self, album):
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog.new()
+            dialog.set_title("Seleccionar carátula para el álbum")
+            
+            filter_img = Gtk.FileFilter()
+            filter_img.set_name("Imágenes")
+            filter_img.add_mime_type("image/jpeg")
+            filter_img.add_mime_type("image/png")
+            
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(filter_img)
+            dialog.set_filters(filters)
+
+            def on_file_selected(dialog, result, *args):
+                try:
+                    file = dialog.open_finish(result)
+                    if file:
+                        self._apply_custom_cover(album, Path(file.get_path()))
+                except GLib.Error as e:
+                    print("Selección de carátula cancelada o fallida:", e)
+            dialog.open(self.get_root(), None, on_file_selected)
+        else:
+            dialog = Gtk.FileChooserNative.new(
+                title="Seleccionar carátula para el álbum",
+                parent=self.get_root(),
+                action=Gtk.FileChooserAction.OPEN,
+                accept_label="Seleccionar",
+                cancel_label="Cancelar"
+            )
+            filter_img = Gtk.FileFilter()
+            filter_img.set_name("Imágenes")
+            filter_img.add_mime_type("image/jpeg")
+            filter_img.add_mime_type("image/png")
+            dialog.add_filter(filter_img)
+
+            self._file_chooser = dialog
+            def on_response(dialog, response_id):
+                if response_id == Gtk.ResponseType.ACCEPT:
+                    file = dialog.get_file()
+                    if file:
+                        self._apply_custom_cover(album, Path(file.get_path()))
+                self._file_chooser = None
+            dialog.connect("response", on_response)
+            dialog.show()
+
+    def _apply_custom_cover(self, album, file_path: Path):
+        try:
+            img_bytes = file_path.read_bytes()
+            songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
+            if not songs:
+                return
+
+            ART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            for s in songs:
+                if s.id is not None:
+                    cache_path = ART_CACHE_DIR / f"{s.id}.jpg"
+                    cache_path.write_bytes(img_bytes)
+                    from soundwave.library.album_art import _export_art_to_tmp
+                    _export_art_to_tmp(s.id, cache_path)
+
+            first_song_path = Path(songs[0].filepath)
+            album_dir = first_song_path.parent
+            if album_dir.exists():
+                local_cover = album_dir / "cover.jpg"
+                try:
+                    local_cover.write_bytes(img_bytes)
+                except Exception as e:
+                    print(f"No se pudo guardar la carátula local en {album_dir}: {e}")
+
+            self._populate_albums()
+
+            root = self.get_root()
+            if root and hasattr(root, "add_toast"):
+                root.add_toast("Carátula aplicada al álbum correctamente")
+                
+            # If current playing song is in this album, update art
+            if self.player.current_song:
+                curr = self.player.current_song
+                if curr.album == album["album"]:
+                    if root and hasattr(root, "refresh_current_artwork"):
+                        root.refresh_current_artwork()
+        except Exception as e:
+            print(f"Error al aplicar la carátula personalizada: {e}")

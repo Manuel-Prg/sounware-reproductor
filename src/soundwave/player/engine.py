@@ -367,15 +367,22 @@ class Player:
 
     # --- Equalizer ---
 
-    def set_equalizer_bands(self, bands: list[float]):
-        if len(bands) != 10:
-            return
-        self._equalizer_bands = list(bands)
+    def set_equalizer_bands(self, bands: list[float], n_bands: int = 10):
+        """
+        Apply bands to the GStreamer equalizer.
+        bands: list of gain values (may be 3, 5, 10, 15 or 31 items).
+        n_bands: the UI band mode that produced `bands`.
+        """
+        from soundwave.player.equalizer import gains_for_engine, BAND_MODES
+        if n_bands not in BAND_MODES:
+            n_bands = 10
+        engine_bands = gains_for_engine(bands, n_bands)
+        self._equalizer_bands = engine_bands
         from soundwave.library.config import save_setting
         save_setting("equalizer_bands", self._equalizer_bands)
 
         if self._equalizer and self._equalizer_enabled:
-            for i, val in enumerate(bands):
+            for i, val in enumerate(engine_bands):
                 try:
                     self._equalizer.set_property(f"band{i}", val)
                 except Exception as e:
@@ -489,9 +496,7 @@ class Player:
                     # GstValueList fallback: convert structure to string and parse values
                     struct_str = struct.to_string()
                     import re
-                    match = re.search(r'magnitude=\(?:[a-zA-Z]+\)?{([^}]+)}', struct_str)
-                    if not match:
-                        match = re.search(r'magnitude={([^}]+)}', struct_str)
+                    match = re.search(r'magnitude=(?:\([a-zA-Z]+\))?{([^}]+)}', struct_str)
                     if not match:
                         match = re.search(r'magnitude=\(float\)([-0-9.]+)', struct_str)
                         if match:

@@ -79,10 +79,11 @@ class MusicScanner:
         song = read_metadata(str(filepath))
         if song is None:
             return None
-        song.id = self.db.add_song(song)
+        song_id = self.db.add_song(song)
+        song.id = song_id
         try:
             from soundwave.library.album_art import get_art_path
-            get_art_path(song.id, self.db)
+            get_art_path(song_id, self.db)
         except Exception as e:
             print(f"Error pre-cacheando carátula para archivo único: {e}")
             

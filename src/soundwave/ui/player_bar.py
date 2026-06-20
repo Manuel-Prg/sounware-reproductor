@@ -31,7 +31,6 @@ CAIRO_SUPPORTED = False
 try:
     import cairo
     import gi.repository.cairo
-    import _gi_cairo
     CAIRO_SUPPORTED = True
 except (ImportError, ModuleNotFoundError):
     CAIRO_SUPPORTED = False
@@ -55,6 +54,7 @@ class WaveformDrawingArea(Gtk.DrawingArea):
         self._setup_events()
         self.set_cursor_from_name("pointer")
 
+    # pyrefly: ignore [bad-override]
     def set_cursor_from_name(self, cursor_name: str):
         try:
             display = Gdk.Display.get_default()
@@ -156,7 +156,7 @@ class WaveformDrawingArea(Gtk.DrawingArea):
     def _draw_callback(self, area, cr, width, height, user_data):
         if not self._sensitive:
             cr.set_source_rgba(0.5, 0.5, 0.5, 0.15)
-            self._draw_rounded_rect(cr, 0, height/2 - 2, width, 4, 2)
+            draw_rounded_rect(cr, 0, height/2 - 2, width, 4, 2)
             cr.fill()
             return
 
@@ -213,6 +213,7 @@ class WaveformProgressBar(Gtk.Box):
             self.append(self._drawing_area)
             self._scale = None
         else:
+            # pyrefly: ignore [bad-assignment]
             self._drawing_area = None
             self._scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 1.0, 0.001)
             self._scale.set_draw_value(False)
@@ -232,36 +233,36 @@ class WaveformProgressBar(Gtk.Box):
 
     def set_sensitive(self, sensitive: bool):
         self._sensitive = sensitive
-        if self._drawing_area:
+        if self._drawing_area is not None:
             self._drawing_area.set_sensitive(sensitive)
-        if self._scale:
+        if self._scale is not None:
             self._scale.set_sensitive(sensitive)
 
     def get_sensitive(self) -> bool:
         return self._sensitive
 
     def set_waveform(self, data: list[float]):
-        if self._drawing_area:
+        if self._drawing_area is not None:
             self._drawing_area.set_waveform(data)
 
     def set_progress(self, progress: float):
-        if self._drawing_area:
+        if self._drawing_area is not None:
             self._drawing_area.set_progress(progress)
-        if self._scale:
+        if self._scale is not None:
             self._scale.set_value(progress)
 
     def set_accent_color(self, r: float, g: float, b: float):
-        if self._drawing_area:
+        if self._drawing_area is not None:
             self._drawing_area.set_accent_color(r, g, b)
 
     def reset_colors(self):
-        if self._drawing_area:
+        if self._drawing_area is not None:
             self._drawing_area.reset_colors()
 
 
-class PlayerBar(Gtk.Box):
+class PlayerBar(Gtk.CenterBox):
     def __init__(self, player: Player, db: Optional[Database] = None):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        super().__init__()
         self._player = player
         self._db = db
         self._toggle_mini_cbs: list[ToggleMiniCallback] = []
@@ -288,6 +289,7 @@ class PlayerBar(Gtk.Box):
         left_box.set_margin_start(12)
         left_box.set_margin_top(8)
         left_box.set_margin_bottom(8)
+        left_box.set_valign(Gtk.Align.CENTER)
 
         self._art_image = Gtk.Picture()
         self._art_image.set_size_request(56, 56)
@@ -321,18 +323,21 @@ class PlayerBar(Gtk.Box):
         info_box.append(self._artist_label)
 
         left_box.append(info_box)
-        self.append(left_box)
+        self.set_start_widget(left_box)
 
         # Center: playback controls
         center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         center_box.set_hexpand(True)
         center_box.set_halign(Gtk.Align.CENTER)
+        center_box.set_valign(Gtk.Align.CENTER)
 
         controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         controls_box.set_halign(Gtk.Align.CENTER)
+        controls_box.set_valign(Gtk.Align.CENTER)
 
         self._prev_button = Gtk.Button.new_from_icon_name("media-skip-backward-symbolic")
         self._prev_button.set_css_classes(["flat", "circular"])
+        self._prev_button.set_valign(Gtk.Align.CENTER)
         self._prev_button.connect("clicked", lambda b: self._player.previous())
         self._prev_button.set_tooltip_text("Anterior (Ctrl+Left)")
         controls_box.append(self._prev_button)
@@ -340,12 +345,14 @@ class PlayerBar(Gtk.Box):
         self._play_button = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
         self._play_button.set_css_classes(["play-button-main", "circular"])
         self._play_button.set_size_request(44, 44)
+        self._play_button.set_valign(Gtk.Align.CENTER)
         self._play_button.connect("clicked", lambda b: self._on_play_pause())
         self._play_button.set_tooltip_text("Reproducir/Pausar (Space)")
         controls_box.append(self._play_button)
 
         self._next_button = Gtk.Button.new_from_icon_name("media-skip-forward-symbolic")
         self._next_button.set_css_classes(["flat", "circular"])
+        self._next_button.set_valign(Gtk.Align.CENTER)
         self._next_button.connect("clicked", lambda b: self._player.next())
         self._next_button.set_tooltip_text("Siguiente (Ctrl+Right)")
         controls_box.append(self._next_button)
@@ -355,24 +362,28 @@ class PlayerBar(Gtk.Box):
         # Progress bar
         progress_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         progress_box.set_halign(Gtk.Align.CENTER)
+        progress_box.set_valign(Gtk.Align.CENTER)
         progress_box.set_size_request(400, -1)
 
         self._time_label = Gtk.Label(label="0:00")
         self._time_label.add_css_class("caption")
+        self._time_label.set_valign(Gtk.Align.CENTER)
         progress_box.append(self._time_label)
 
         self._progress_scale = WaveformProgressBar(seek_callback=self._on_waveform_seek)
         self._progress_scale.set_size_request(300, 24)
         self._progress_scale.set_hexpand(True)
+        self._progress_scale.set_valign(Gtk.Align.CENTER)
         self._progress_scale.set_sensitive(False)
         progress_box.append(self._progress_scale)
 
         self._duration_label = Gtk.Label(label="0:00")
         self._duration_label.add_css_class("caption")
+        self._duration_label.set_valign(Gtk.Align.CENTER)
         progress_box.append(self._duration_label)
 
         center_box.append(progress_box)
-        self.append(center_box)
+        self.set_center_widget(center_box)
 
         # Right: volume + extras
         right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -452,7 +463,7 @@ class PlayerBar(Gtk.Box):
         self._mini_button.connect("clicked", lambda b: self._emit_toggle_mini())
         right_box.append(self._mini_button)
 
-        self.append(right_box)
+        self.set_end_widget(right_box)
 
     def _on_play_pause(self):
         self._player.play_pause()
@@ -576,6 +587,7 @@ class PlayerBar(Gtk.Box):
             if wave:
                 try:
                     local_db = Database(self._db.db_path)
+                    # pyrefly: ignore [bad-argument-type]
                     local_db.update_song_waveform(song.id, json.dumps(wave))
                     local_db.close()
                 except Exception as e:

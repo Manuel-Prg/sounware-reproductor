@@ -30,7 +30,7 @@
       "build-commands": [
         "pip3 install mutagen --prefix=/app",
         "pip3 install . --prefix=/app",
-        "install -Dm644 data/icons/soundwave.svg /app/share/icons/hicolor/scalable/apps/io.github.soundwave.Soundwave.svg",
+        "install -Dm644 data/icons/icono-light.png /app/share/icons/hicolor/512x512/apps/io.github.soundwave.Soundwave.png",
         "install -Dm644 flatpak/soundwave.desktop /app/share/applications/io.github.soundwave.Soundwave.desktop",
         "install -Dm644 flatpak/io.github.soundwave.Soundwave.metainfo.xml /app/share/metainfo/io.github.soundwave.Soundwave.metainfo.xml"
       ],

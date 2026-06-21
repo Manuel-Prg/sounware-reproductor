@@ -102,12 +102,53 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         # Prompt user on first run about auto album art download
         GLib.idle_add(self._maybe_prompt_art_download)
 
+    def apply_accent_color(self, hex_code: str):
+        self._setup_css()
+
     def _setup_css(self):
-        css_provider = Gtk.CssProvider()
+        if not hasattr(self, "_css_provider"):
+            self._css_provider = Gtk.CssProvider()
+            Gtk.StyleContext.add_provider_for_display(
+                self.get_display(),
+                self._css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+        
+        from soundwave.library.config import load_settings
+        settings = load_settings()
+        accent_hex = settings.get("accent_color", "#1DB954")
+        
+        HOVER_COLORS = {
+            "#1DB954": "#1ED760", # Green
+            "#3584e4": "#4a90e2", # Blue
+            "#9141ac": "#a352be", # Purple
+            "#e01b24": "#ec2f38", # Red
+            "#ff7800": "#ff8c1a", # Orange
+            "#f6d32d": "#f8dc4b", # Yellow
+            "#16a085": "#1abc9c", # Teal
+            "#e01b84": "#eb2f96", # Pink
+            "#777777": "#888888", # Gray
+        }
+        hover_hex = HOVER_COLORS.get(accent_hex, accent_hex)
+        
+        # Parse rgb for shadows
+        hex_clean = accent_hex.lstrip('#')
+        r = int(hex_clean[0:2], 16)
+        g = int(hex_clean[2:4], 16)
+        b = int(hex_clean[4:6], 16)
+        
+        shadow_rgba_30 = f"rgba({r}, {g}, {b}, 0.3)"
+        shadow_rgba_40 = f"rgba({r}, {g}, {b}, 0.4)"
+        shadow_rgba_45 = f"rgba({r}, {g}, {b}, 0.45)"
+
         css = """
-        @define-color accent_bg_color #1DB954;
-        @define-color accent_color #1DB954;
+        @define-color accent_bg_color ACCENT_HEX_PLACEHOLDER;
+        @define-color accent_color ACCENT_HEX_PLACEHOLDER;
         @define-color accent_fg_color #ffffff;
+        @define-color accent_hover_color ACCENT_HOVER_PLACEHOLDER;
+        @define-color accent_shadow_30 ACCENT_SHADOW_30_PLACEHOLDER;
+        @define-color accent_shadow_40 ACCENT_SHADOW_40_PLACEHOLDER;
+        @define-color accent_shadow_45 ACCENT_SHADOW_45_PLACEHOLDER;
 
         .navigation-sidebar {
             background-color: @view_bg_color;
@@ -120,13 +161,25 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             box-shadow: none;
         }
         .sidebar-row {
-            border-radius: 99px;
-            margin: 4px 12px;
-            padding: 8px 16px;
+            border-radius: 6px;
+            margin: 2px 8px;
+            padding: 8px 12px;
+            transition: all 0.2s ease;
+        }
+        .sidebar-row:hover {
+            background-color: alpha(currentColor, 0.05);
         }
         .sidebar-row:selected {
-            background-color: @accent_bg_color;
-            color: #000000;
+            background-color: alpha(@accent_bg_color, 0.12);
+            color: @accent_bg_color;
+            font-weight: bold;
+        }
+        .sidebar-row:selected label,
+        .sidebar-row:selected image {
+            color: @accent_bg_color;
+        }
+        .sidebar-row:selected .dim-label {
+            color: alpha(@accent_bg_color, 0.7);
         }
         .player-bar {
             background-color: @window_bg_color;
@@ -178,54 +231,246 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             opacity: 1.0;
         }
         .album-play-btn:hover {
-            background-color: #1ED760;
+            background-color: @accent_hover_color;
             transform: scale(1.1);
         }
-        .genre-card {
-            padding: 16px;
+        .genres-grid {
+            margin: 16px;
+        }
+        .genres-grid flowboxchild {
+            padding: 0px;
+            background: none;
             border-radius: 12px;
-            background-color: @card_bg_color;
-            transition: all 0.2s ease;
+        }
+        .genre-card {
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+            cursor: pointer;
+            overflow: hidden;
         }
         .genre-card:hover {
-            transform: scale(1.04);
-            background-color: alpha(@accent_bg_color, 0.08);
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
         }
-        .genre-icon-box {
-            background-color: alpha(@accent_bg_color, 0.12);
-            color: @accent_bg_color;
-            padding: 8px;
-            border-radius: 8px;
-            margin-bottom: 8px;
+        .genre-card-bg-icon {
+            opacity: 0.15;
+            color: #ffffff;
+            margin-right: -10px;
+            margin-bottom: -10px;
+            transition: all 0.25s ease;
         }
-        .genre-name {
-            font-weight: bold;
+        .genre-card:hover .genre-card-bg-icon {
+            transform: scale(1.15) rotate(-10deg);
+            opacity: 0.25;
+        }
+        .genre-card-name {
+            font-weight: 800;
+            font-size: 16px;
+            color: #ffffff;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .genre-card-count {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        .genre-card-grad-0 {
+            background: linear-gradient(135deg, #FF512F, #DD2476);
+        }
+        .genre-card-grad-1 {
+            background: linear-gradient(135deg, #185a9d, #3cba92);
+        }
+        .genre-card-grad-2 {
+            background: linear-gradient(135deg, #ee0979, #ff6a00);
+        }
+        .genre-card-grad-3 {
+            background: linear-gradient(135deg, #11998e, #38ef7d);
+        }
+        .genre-card-grad-4 {
+            background: linear-gradient(135deg, #8A2387, #E94057, #F27121);
+        }
+        .genre-card-grad-5 {
+            background: linear-gradient(135deg, #DA22FF, #9733EE);
+        }
+        .genre-card-grad-6 {
+            background: linear-gradient(135deg, #1f4037, #99f2c8);
+        }
+        .genre-card-grad-7 {
+            background: linear-gradient(135deg, #00c6ff, #0072ff);
+        }
+        .genre-card-no-genre {
+            background: linear-gradient(135deg, #757F9A, #D7DDE8);
+        }
+        .genre-card-no-genre .genre-card-name, .genre-card-no-genre .genre-card-count {
+            color: #2c3e50;
+            text-shadow: none;
+        }
+        .genre-card-no-genre .genre-card-bg-icon {
+            color: #2c3e50;
+            opacity: 0.12;
+        }
+        .smart-grid {
+            margin: 16px;
+        }
+        .smart-grid flowboxchild {
+            padding: 0px;
+            background: none;
+            border-radius: 12px;
+        }
+        .smart-card {
+            border-radius: 12px;
+            background-color: @card_bg_color;
+            transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+        }
+        .smart-card:hover {
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+            background-color: alpha(@accent_bg_color, 0.04);
+        }
+        .smart-icon-container {
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            color: #ffffff;
+        }
+        .smart-card-title {
+            font-weight: 800;
             font-size: 15px;
             margin-top: 4px;
         }
-        .genre-count {
+        .smart-card-subtitle {
             font-size: 12px;
-            color: alpha(currentColor, 0.6);
+            color: alpha(currentColor, 0.55);
+            font-weight: 500;
         }
-        .smart-card {
-            padding: 16px;
+        .smart-play-btn {
+            background-color: @accent_bg_color;
+            color: #000000;
+            border-radius: 99px;
+            border: none;
+            opacity: 0.0;
+            transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .smart-card:hover .smart-play-btn {
+            opacity: 1.0;
+            transform: translateY(-4px);
+        }
+        .smart-play-btn:hover {
+            background-color: @accent_hover_color;
+            transform: translateY(-4px) scale(1.1);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        }
+        .smart-icon-recien-anadido {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+        }
+        .smart-icon-favoritos {
+            background: linear-gradient(135deg, #ff0844, #ffb199);
+        }
+        .smart-icon-mas-escuchadas {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+        .smart-icon-jazz {
+            background: linear-gradient(135deg, #13f1fc, #0470dc);
+        }
+        .smart-icon-rock {
+            background: linear-gradient(135deg, #434343, #000000);
+        }
+        .smart-icon-electronica {
+            background: linear-gradient(135deg, #0ba360, #3cba92);
+        }
+        .playlists-grid {
+            margin: 16px;
+        }
+        .playlists-grid flowboxchild {
+            padding: 0px;
+            background: none;
+            border-radius: 12px;
+        }
+        .playlist-card {
             border-radius: 12px;
             background-color: @card_bg_color;
-            transition: all 0.2s ease;
+            transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         }
-        .smart-card:hover {
-            transform: scale(1.04);
-            background-color: alpha(@accent_bg_color, 0.08);
+        .playlist-card:hover {
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+            background-color: alpha(@accent_bg_color, 0.04);
         }
-        .card-subtitle {
+        .playlist-icon-container {
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            color: #ffffff;
+        }
+        .playlist-card-title {
+            font-weight: 800;
+            font-size: 15px;
+            margin-top: 4px;
+        }
+        .playlist-card-subtitle {
             font-size: 12px;
+            color: alpha(currentColor, 0.55);
+            font-weight: 500;
         }
-        .play-pulse {
-            transition: all 0.2s ease;
-        }
-        .play-pulse:hover {
+        .playlist-play-btn {
             background-color: @accent_bg_color;
-            color: @accent_fg_color;
+            color: #000000;
+            border-radius: 99px;
+            border: none;
+            opacity: 0.0;
+            transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .playlist-delete-btn {
+            background-color: alpha(#ff3b30, 0.1);
+            color: #ff3b30;
+            border-radius: 99px;
+            border: none;
+            opacity: 0.0;
+            transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+        .playlist-delete-btn:hover {
+            background-color: #ff3b30;
+            color: #ffffff;
+        }
+        .playlist-card:hover .playlist-play-btn, 
+        .playlist-card:hover .playlist-delete-btn {
+            opacity: 1.0;
+            transform: translateY(-4px);
+        }
+        .playlist-play-btn:hover {
+            background-color: @accent_hover_color;
+            transform: translateY(-4px) scale(1.1);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        }
+        .playlist-icon-grad-0 {
+            background: linear-gradient(135deg, #FF5E36, #FFAE33);
+        }
+        .playlist-icon-grad-1 {
+            background: linear-gradient(135deg, #FF2A6D, #9B51E0);
+        }
+        .playlist-icon-grad-2 {
+            background: linear-gradient(135deg, #0575E6, #00F260);
+        }
+        .playlist-icon-grad-3 {
+            background: linear-gradient(135deg, #7F00FF, #E100FF);
+        }
+        .playlist-icon-grad-4 {
+            background: linear-gradient(135deg, #f857a6, #ff5858);
+        }
+        .playlist-icon-grad-5 {
+            background: linear-gradient(135deg, #11998e, #38ef7d);
+        }
+        .playlist-icon-grad-6 {
+            background: linear-gradient(135deg, #4A00E0, #8E2DE2);
+        }
+        .playlist-icon-grad-7 {
+            background: linear-gradient(135deg, #ED213A, #93291E);
         }
         .song-fav-active {
             color: #e02424;
@@ -267,25 +512,25 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             background-color: @accent_bg_color;
             color: #000000;
             border-radius: 50%;
-            box-shadow: 0 4px 14px rgba(29, 185, 84, 0.3);
+            box-shadow: 0 4px 14px @accent_shadow_30;
             transition: all 0.2s ease;
             padding: 0;
         }
         .play-button-main:hover {
             transform: scale(1.08);
-            background-color: #1ED760;
-            box-shadow: 0 6px 20px rgba(29, 185, 84, 0.45);
+            background-color: @accent_hover_color;
+            box-shadow: 0 6px 20px @accent_shadow_45;
         }
         .green-deck-btn {
             background-color: @accent_bg_color;
             color: #000000;
             border-radius: 50%;
-            box-shadow: 0 4px 14px rgba(29, 185, 84, 0.3);
+            box-shadow: 0 4px 14px @accent_shadow_30;
             transition: all 0.2s ease;
         }
         .green-deck-btn:hover {
             transform: scale(1.08);
-            background-color: #1ED760;
+            background-color: @accent_hover_color;
         }
         .now-playing-row {
             border-left: 3px solid @accent_bg_color;
@@ -306,7 +551,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             min-width: 14px;
             border-radius: 50%;
             background-color: @accent_bg_color;
-            box-shadow: 0 2px 6px rgba(29, 185, 84, 0.4);
+            box-shadow: 0 2px 6px @accent_shadow_40;
         }
         .album-cover {
             border-radius: 6px;
@@ -341,12 +586,13 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             font-size: 18px;
         }
         """
-        css_provider.load_from_string(css)
-        Gtk.StyleContext.add_provider_for_display(
-            self.get_display(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
+        css = css.replace("ACCENT_HEX_PLACEHOLDER", accent_hex)
+        css = css.replace("ACCENT_HOVER_PLACEHOLDER", hover_hex)
+        css = css.replace("ACCENT_SHADOW_30_PLACEHOLDER", shadow_rgba_30)
+        css = css.replace("ACCENT_SHADOW_40_PLACEHOLDER", shadow_rgba_40)
+        css = css.replace("ACCENT_SHADOW_45_PLACEHOLDER", shadow_rgba_45)
+
+        self._css_provider.load_from_string(css)
 
     def _build_sidebar(self) -> Gtk.Widget:
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -396,6 +642,7 @@ class SoundwaveWindow(Adw.ApplicationWindow):
             ("avatar-default-symbolic", "Artistas", "artists"),
             ("folder-music-symbolic", "Géneros", "genres"),
             ("view-list-symbolic", "Listas Inteligentes", "smart"),
+            ("playlist-symbolic", "Listas de reproducción", "playlists"),
         ]
         self._sidebar_count_labels = {}
         for icon_name, label, view_id in items:
@@ -638,11 +885,17 @@ class SoundwaveWindow(Adw.ApplicationWindow):
         except Exception:
             genres_count = 0
 
+        try:
+            playlists_count = len(self.db.get_playlists())
+        except Exception:
+            playlists_count = 0
+
         if hasattr(self, "_sidebar_count_labels"):
             self._sidebar_count_labels["all"].set_text(str(stats.get("total_songs", 0)))
             self._sidebar_count_labels["albums"].set_text(str(stats.get("total_albums", 0)))
             self._sidebar_count_labels["artists"].set_text(str(stats.get("total_artists", 0)))
             self._sidebar_count_labels["genres"].set_text(str(genres_count))
+            self._sidebar_count_labels["playlists"].set_text(str(playlists_count))
 
     # --- Sidebar navigation ---
     def _on_sidebar_row_activated(self, listbox, row):

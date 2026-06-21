@@ -46,6 +46,7 @@ def _detect_embedded_art(mfile, tags: dict) -> tuple[bool, str]:
         if not pics and hasattr(mfile, "get"):
             metadata_picture = mfile.get("metadata_block_picture")
             if metadata_picture:
+                # pyrefly: ignore [implicit-import]
                 pics = [mutagen.flac.Picture(metadata_picture[0])]
         if pics:
             return True, pics[0].mime
@@ -196,6 +197,7 @@ def extract_embedded_art(filepath: str) -> Optional[bytes]:
             return pics[0].data
         metadata_picture = mfile.get("metadata_block_picture")
         if metadata_picture:
+            # pyrefly: ignore [implicit-import]
             pic = mutagen.flac.Picture(metadata_picture[0])
             return pic.data
 

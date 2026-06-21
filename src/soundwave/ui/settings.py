@@ -58,6 +58,46 @@ class SettingsDialog(Adw.PreferencesWindow):
         theme_row.connect("notify::selected", on_theme_changed)
         appearance_group.add(theme_row)
 
+        # Accent color selection
+        accent_row = Adw.ComboRow()
+        accent_row.set_title("Color de acento")
+        accent_row.set_subtitle("Elige el color de acentuación de la interfaz")
+        
+        ACCENT_COLORS = [
+            ("Verde (Predeterminado)", "#1DB954"),
+            ("Azul", "#3584e4"),
+            ("Púrpura", "#9141ac"),
+            ("Rojo", "#e01b24"),
+            ("Naranja", "#ff7800"),
+            ("Teal", "#16a085"),
+            ("Rosa", "#e01b84"),
+            ("Gris", "#777777")
+        ]
+        
+        accent_names = [name for name, _ in ACCENT_COLORS]
+        accent_model = Gtk.StringList.new(accent_names)
+        accent_row.set_model(accent_model)
+        
+        current_settings = load_settings()
+        current_accent = current_settings.get("accent_color", "#1DB954")
+        selected_idx = 0
+        for idx, (_, hex_code) in enumerate(ACCENT_COLORS):
+            if hex_code == current_accent:
+                selected_idx = idx
+                break
+        accent_row.set_selected(selected_idx)
+        
+        def on_accent_changed(row, pspec):
+            idx = row.get_selected()
+            if 0 <= idx < len(ACCENT_COLORS):
+                hex_code = ACCENT_COLORS[idx][1]
+                save_setting("accent_color", hex_code)
+                if hasattr(self.parent_window, "apply_accent_color"):
+                    self.parent_window.apply_accent_color(hex_code)
+                    
+        accent_row.connect("notify::selected", on_accent_changed)
+        appearance_group.add(accent_row)
+
         # Group 2: Library
         library_group = Adw.PreferencesGroup()
         library_group.set_title("Biblioteca de Música")

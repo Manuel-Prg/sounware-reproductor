@@ -10,6 +10,9 @@ build/
 env/
 venv/
 .venv/
+build-appimage/
+build-flatpak/
+soundwave-x86_64.AppImage
 .env
 *.swp
 *.swo

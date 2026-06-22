@@ -20,6 +20,7 @@ class LyricsView(Gtk.Box):
         self._song: Optional[Song] = None
         self._current_index = -1
         self._loading = False
+        self._first_update = True  # Para sincronización inicial
         self._setup_ui()
 
     def _setup_ui(self):
@@ -73,6 +74,7 @@ class LyricsView(Gtk.Box):
     def _on_lyrics_loaded(self, lyrics: list[LyricsLine]):
         self._loading = False
         self._lyrics = lyrics
+        self._first_update = True  # Resetear para la próxima sincronización
         if not self._lyrics:
             self._placeholder.set_label("No se encontraron letras\npara esta canción")
             self._placeholder.set_visible(True)
@@ -100,10 +102,22 @@ class LyricsView(Gtk.Box):
             return
 
         # Buscar el índice activo
-        idx = -1
-        for i, line in enumerate(self._lyrics):
-            if position_ms >= line.timestamp_ms:
-                idx = i
+        if self._first_update:
+            # Primera actualización: encontrar la línea más cercana para sincronización inicial
+            idx = -1
+            min_diff = float('inf')
+            for i, line in enumerate(self._lyrics):
+                diff = abs(position_ms - line.timestamp_ms)
+                if diff < min_diff:
+                    min_diff = diff
+                    idx = i
+            self._first_update = False
+        else:
+            # Actualizaciones subsiguientes: usar última línea menor o igual para evitar saltos prematuros
+            idx = -1
+            for i, line in enumerate(self._lyrics):
+                if position_ms >= line.timestamp_ms:
+                    idx = i
 
         if idx == self._current_index:
             return

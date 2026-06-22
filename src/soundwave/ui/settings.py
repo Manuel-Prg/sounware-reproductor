@@ -175,6 +175,52 @@ class SettingsDialog(Adw.PreferencesWindow):
         replaygain_row.connect("notify::selected", on_replaygain_changed)
         audio_group.add(replaygain_row)
 
+        # Crossfade setting
+        crossfade_row = Adw.SpinRow()
+        crossfade_row.set_title("Crossfade")
+        crossfade_row.set_subtitle("Tiempo de transición suave entre canciones (segundos)")
+        crossfade_row.set_adjustment(Gtk.Adjustment.new(0, 0, 10, 0.5, 1, 0))
+        
+        # Cargar configuración actual de Crossfade
+        settings = load_settings()
+        current_crossfade = settings.get("crossfade_duration", 0)
+        crossfade_row.set_value(current_crossfade)
+
+        def on_crossfade_changed(row, pspec):
+            save_setting("crossfade_duration", row.get_value())
+
+        crossfade_row.connect("notify::value", on_crossfade_changed)
+        audio_group.add(crossfade_row)
+
+        # Equalizer bands setting
+        eq_bands_row = Adw.ComboRow()
+        eq_bands_row.set_title("Bandas del Ecualizador")
+        eq_bands_row.set_subtitle("Número de bandas del ecualizador (más bandas = más control)")
+        eq_bands_model = Gtk.StringList.new(["3 bandas", "5 bandas", "10 bandas"])
+        eq_bands_row.set_model(eq_bands_model)
+
+        # Cargar configuración actual de bandas
+        settings = load_settings()
+        current_n_bands = settings.get("equalizer_n_bands", 10)
+        if current_n_bands == 3:
+            eq_bands_row.set_selected(0)
+        elif current_n_bands == 5:
+            eq_bands_row.set_selected(1)
+        elif current_n_bands == 10:
+            eq_bands_row.set_selected(2)
+        else:
+            eq_bands_row.set_selected(2)  # Default to 10
+
+        def on_eq_bands_changed(row, pspec):
+            selected = row.get_selected()
+            n_bands_map = [3, 5, 10]
+            n_bands = n_bands_map[selected]
+            save_setting("equalizer_n_bands", n_bands)
+            # Note: El ecualizador se reconstruirá al reiniciar la aplicación
+
+        eq_bands_row.connect("notify::selected", on_eq_bands_changed)
+        audio_group.add(eq_bands_row)
+
         # Page 2: Connections
         conn_page = Adw.PreferencesPage()
         conn_page.set_title("Conexiones")

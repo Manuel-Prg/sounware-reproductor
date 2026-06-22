@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from soundwave.library.metadata import _parse_gain
+from soundwave.library.metadata.metadata import _parse_gain
 from soundwave.library.database import Song
 from soundwave.player.engine import Player, RepeatMode
 
@@ -73,7 +73,7 @@ class TestSoundwaveCore(unittest.TestCase):
 
     def test_smart_playlist(self):
         from soundwave.library.database import Database
-        from soundwave.library.smart_playlist import evaluate_rules
+        from soundwave.library.playlists.smart_playlist import evaluate_rules
         import tempfile
         import shutil
 
@@ -115,7 +115,7 @@ class TestSoundwaveCore(unittest.TestCase):
             shutil.rmtree(temp_dir)
 
     def test_waveform_generation(self):
-        from soundwave.library.waveform_helper import generate_waveform_data
+        from soundwave.library.utils.waveform_helper import generate_waveform_data
         test_file = "/home/manuelprz/.local/share/Steam/steamui/sounds/pop_sound.wav"
         if Path(test_file).exists():
             waveform = generate_waveform_data(test_file, num_points=10)

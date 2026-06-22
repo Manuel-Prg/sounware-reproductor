@@ -112,6 +112,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         overlay_scroll.set_halign(Gtk.Align.FILL)
         overlay_scroll.set_valign(Gtk.Align.FILL)
         overlay_scroll.set_vexpand(True)
+        overlay_scroll.set_margin_top(20)
         overlay_scroll.set_margin_bottom(120)
 
         overlay_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)

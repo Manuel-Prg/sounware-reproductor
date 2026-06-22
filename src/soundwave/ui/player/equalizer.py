@@ -49,7 +49,7 @@ class EqualizerDialog(Adw.Window):
         toolbar_view.add_top_bar(header)
 
         # Band-mode selector
-        mode_labels = ["3 bandas", "5 bandas", "10 bandas", "15 bandas", "31 bandas"]
+        mode_labels = ["3 bandas", "5 bandas", "10 bandas"]
         mode_store = Gtk.StringList.new(mode_labels)
         self._mode_dropdown = Gtk.DropDown(model=mode_store)
         self._mode_dropdown.set_selected(BAND_MODES.index(self._band_mode))

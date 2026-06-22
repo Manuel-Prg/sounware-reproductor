@@ -38,6 +38,8 @@ class WaveformDrawingArea(Gtk.DrawingArea):
         self.set_draw_func(self._draw_callback, None)
         self._setup_events()
         self.set_cursor_from_name("pointer")
+        self.set_content_height(24)
+        self.set_content_width(300)
 
     # pyrefly: ignore [bad-override]
     def set_cursor_from_name(self, cursor_name: str):

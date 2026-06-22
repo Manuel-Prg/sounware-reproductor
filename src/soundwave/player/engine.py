@@ -65,10 +65,16 @@ class Player:
         
         # Cargar configuración del ecualizador y ReplayGain
         from soundwave.library.config.config import load_settings
+        from soundwave.player.equalizer import BAND_MODES
         settings = load_settings()
-        self._equalizer_bands: list[float]     = settings.get("equalizer_bands", [0.0] * 10)
-        self._equalizer_enabled: bool          = settings.get("equalizer_enabled", True)
-        self._replaygain_mode: str             = settings.get("replaygain_mode", "track")
+        self._equalizer_n_bands: int = settings.get("equalizer_n_bands", 10)
+        # Fallback si el número de bandas guardado ya no es válido
+        if self._equalizer_n_bands not in BAND_MODES:
+            self._equalizer_n_bands = 10
+        self._equalizer_bands: list[float] = settings.get("equalizer_bands", [0.0] * self._equalizer_n_bands)
+        self._equalizer_enabled: bool = settings.get("equalizer_enabled", True)
+        self._replaygain_mode: str = settings.get("replaygain_mode", "track")
+        self._crossfade_duration: float = settings.get("crossfade_duration", 0)
 
         self._state_callbacks:    list[StateChangeCallback] = []
         self._song_callbacks:     list[SongChangeCallback]  = []
@@ -77,6 +83,8 @@ class Player:
         self._spectrum_callbacks: list[Callable[[list[float]], None]] = []
 
         self._position_timer: Optional[int] = None
+        self._crossfade_fade_out_timer: Optional[int] = None
+        self._crossfade_volume_step: float = 0.0
 
         # Construir el pipeline UNA sola vez al inicio
         self._build_pipeline()
@@ -116,6 +124,8 @@ class Player:
         """Inserta el ecualizador y el espectro en el pipeline (llamar antes del primer play)."""
         if self._equalizer or not self._playbin:
             return
+        
+        # Usar equalizer-10bands para compatibilidad (equalizer-nbands tiene API diferente)
         eq = Gst.ElementFactory.make("equalizer-10bands", "equalizer")
         spec = Gst.ElementFactory.make("spectrum", "spectrum")
 
@@ -144,18 +154,38 @@ class Player:
 
             self._playbin.set_property("audio-filter", filt_bin)
 
-            # Aplicar bandas iniciales teniendo en cuenta si está activado
-            bands_to_apply = self._equalizer_bands if self._equalizer_enabled else [0.0] * 10
+            # Aplicar bandas iniciales usando interpolación a 10 bandas
+            from soundwave.player.equalizer import gains_for_engine
+            n_bands = self._equalizer_n_bands
+            if len(self._equalizer_bands) != n_bands:
+                self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
+                self._equalizer_bands = self._equalizer_bands[:n_bands]
+            
+            # Convertir a 10 bandas para equalizer-10bands
+            engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
+            bands_to_apply = engine_bands if self._equalizer_enabled else [0.0] * 10
+            
             for i, val in enumerate(bands_to_apply):
                 try:
                     self._equalizer.set_property(f"band{i}", val)
+                    print(f"[Equalizer] Banda inicial {i}: {val} dB")
                 except Exception as e:
                     print(f"Error al aplicar banda {i}: {e}")
         elif eq:
             self._equalizer = eq
             self._playbin.set_property("audio-filter", self._equalizer)
-            # Aplicar bandas iniciales teniendo en cuenta si está activado
-            bands_to_apply = self._equalizer_bands if self._equalizer_enabled else [0.0] * 10
+            
+            # Aplicar bandas iniciales usando interpolación a 10 bandas
+            from soundwave.player.equalizer import gains_for_engine
+            n_bands = self._equalizer_n_bands
+            if len(self._equalizer_bands) != n_bands:
+                self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
+                self._equalizer_bands = self._equalizer_bands[:n_bands]
+            
+            # Convertir a 10 bandas para equalizer-10bands
+            engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
+            bands_to_apply = engine_bands if self._equalizer_enabled else [0.0] * 10
+            
             for i, val in enumerate(bands_to_apply):
                 try:
                     self._equalizer.set_property(f"band{i}", val)
@@ -376,17 +406,28 @@ class Player:
         from soundwave.player.equalizer import gains_for_engine, BAND_MODES
         if n_bands not in BAND_MODES:
             n_bands = 10
-        engine_bands = gains_for_engine(bands, n_bands)
-        self._equalizer_bands = engine_bands
+        
+        # Guardar el número de bandas actual y las bandas originales
+        self._equalizer_n_bands = n_bands
+        self._equalizer_bands = list(bands)
+        
         from soundwave.library.config.config import save_setting
         save_setting("equalizer_bands", self._equalizer_bands)
+        save_setting("equalizer_n_bands", self._equalizer_n_bands)
+
+        # Convertir a 10 bandas para equalizer-10bands
+        engine_bands = gains_for_engine(bands, n_bands)
 
         if self._equalizer and self._equalizer_enabled:
+            print(f"[Equalizer] Aplicando {len(engine_bands)} bandas (interpoladas de {n_bands}): {engine_bands}")
             for i, val in enumerate(engine_bands):
                 try:
                     self._equalizer.set_property(f"band{i}", val)
+                    print(f"[Equalizer] Banda {i}: {val} dB")
                 except Exception as e:
                     print(f"Error al aplicar banda {i}: {e}")
+        else:
+            print(f"[Equalizer] No se aplican bandas - equalizer: {self._equalizer is not None}, enabled: {self._equalizer_enabled}")
 
     def get_equalizer_bands(self) -> list[float]:
         return list(self._equalizer_bands)
@@ -397,10 +438,21 @@ class Player:
         save_setting("equalizer_enabled", enabled)
 
         if self._equalizer:
-            bands_to_apply = self._equalizer_bands if enabled else [0.0] * 10
+            # Convertir a 10 bandas para equalizer-10bands
+            from soundwave.player.equalizer import gains_for_engine
+            n_bands = self._equalizer_n_bands
+            if len(self._equalizer_bands) != n_bands:
+                self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
+                self._equalizer_bands = self._equalizer_bands[:n_bands]
+            
+            engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
+            bands_to_apply = engine_bands if enabled else [0.0] * 10
+            
+            print(f"[Equalizer] Habilitado/Deshabilitado: {enabled}, aplicando {len(bands_to_apply)} bandas")
             for i, val in enumerate(bands_to_apply):
                 try:
                     self._equalizer.set_property(f"band{i}", val)
+                    print(f"[Equalizer] Banda {i}: {val} dB")
                 except Exception as e:
                     print(f"Error al aplicar banda {i}: {e}")
 
@@ -465,6 +517,13 @@ class Player:
         self._playbin.set_property("uri", Path(song.filepath).resolve().as_uri())
         self._apply_volume_with_gain()
         GLib.idle_add(lambda: self._emit_song())
+
+        # Crossfade: bajar volumen gradualmente si está habilitado
+        # Nota: Implementación básica de crossfade usando volumen
+        # Para crossfade real se requiere un pipeline más complejo con dos playbins
+        if self._crossfade_duration > 0:
+            self._crossfade_volume_step = 1.0 / (self._crossfade_duration * 10)  # 10 steps per second
+            self._crossfade_fade_out_timer = GLib.timeout_add(100, self._crossfade_fade_step, self._crossfade_duration * 10)
 
     def _on_bus_message(self, bus, message):
         t = message.type
@@ -557,6 +616,21 @@ class Player:
             if pos:
                 self._emit_position(pos)
         return True  # mantener el timer vivo
+
+    def _crossfade_fade_step(self, steps_remaining: int) -> bool:
+        """Baja el volumen gradualmente durante el crossfade"""
+        if steps_remaining <= 0 or not self._playbin:
+            # Restaurar volumen normal al terminar
+            self._apply_volume_with_gain()
+            self._crossfade_fade_out_timer = None
+            return False
+        
+        # Calcular nuevo volumen (fade out)
+        current_volume = self._playbin.get_property("volume")
+        new_volume = max(0.0, current_volume - self._crossfade_volume_step)
+        self._playbin.set_property("volume", new_volume)
+        
+        return True  # continuar el timer
 
     def destroy(self):
         self._stop_position_timer()

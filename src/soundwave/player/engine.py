@@ -135,7 +135,7 @@ class Player:
 
             # Configure spectrum element
             spec.set_property("bands", 64)
-            spec.set_property("threshold", -60)
+            spec.set_property("threshold", -75)  # Umbral de ruido más bajo para captar frecuencias altas/tenues
             spec.set_property("post-messages", True)
             spec.set_property("message-magnitude", True)
 

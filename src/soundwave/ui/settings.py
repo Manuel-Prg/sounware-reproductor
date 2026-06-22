@@ -221,6 +221,21 @@ class SettingsDialog(Adw.PreferencesWindow):
         eq_bands_row.connect("notify::selected", on_eq_bands_changed)
         audio_group.add(eq_bands_row)
 
+        # Group 4: Help / Onboarding
+        help_group = Adw.PreferencesGroup()
+        help_group.set_title("Ayuda")
+        help_group.set_description("Guías y tutoriales de Soundwave")
+        general_page.add(help_group)
+
+        onboarding_row = Adw.ActionRow()
+        onboarding_row.set_title("Ver tutorial de inicio")
+        onboarding_row.set_subtitle("Muestra la guía rápida de bienvenida y configuración")
+        onboarding_btn = Gtk.Button(label="Mostrar guía")
+        onboarding_btn.set_valign(Gtk.Align.CENTER)
+        onboarding_btn.connect("clicked", self._on_onboarding_clicked)
+        onboarding_row.add_suffix(onboarding_btn)
+        help_group.add(onboarding_row)
+
         # Page 2: Connections
         conn_page = Adw.PreferencesPage()
         conn_page.set_title("Conexiones")
@@ -528,6 +543,12 @@ class SettingsDialog(Adw.PreferencesWindow):
     def _on_scan_clicked(self, btn):
         self.close()
         self.parent_window._open_folder_picker()
+
+    def _on_onboarding_clicked(self, btn):
+        self.close()
+        from soundwave.ui.window.onboarding import OnboardingWindow
+        dialog = OnboardingWindow(self.parent_window)
+        dialog.present()
 
     def _show_error(self, message: str):
         toast = Adw.Toast.new(message)

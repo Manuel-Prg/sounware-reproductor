@@ -88,8 +88,8 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
         # Set up keyboard shortcuts
         self._setup_shortcuts()
 
-        # Scan directory picker on startup
-        self._check_library()
+        # Scan directory picker on startup (onboarding checked first)
+        GLib.idle_add(self._check_onboarding)
 
         # Connect player signals for MPRIS last.fm integration
         self.player.connect_song(self._on_player_song_changed)
@@ -452,3 +452,14 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
             self._mini_player.set_artwork_from_path(art_path)
             if hasattr(self._library_view, "_visualizer_view"):
                 self._library_view._visualizer_view.update_song(song)
+
+    def _check_onboarding(self):
+        from soundwave.library.config.config import load_settings
+        settings = load_settings()
+        if not settings.get("onboarding_completed", False):
+            from soundwave.ui.window.onboarding import OnboardingWindow
+            dialog = OnboardingWindow(self)
+            dialog.present()
+        else:
+            self._check_library()
+        return False

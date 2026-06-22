@@ -312,6 +312,9 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         cr.set_source(bg_pat)
         cr.fill()
 
+        if self._show_discography:
+            return
+
         num_bars = len(self._current_values)
         if num_bars == 0:
             return
@@ -437,13 +440,21 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
                 cr.fill()
 
     def _on_spectrum_data(self, magnitudes: list[float]):
-        threshold = -60.0
-        for i in range(min(len(magnitudes), len(self._target_values))):
+        threshold = -75.0
+        n_bands = len(self._target_values)
+        for i in range(min(len(magnitudes), n_bands)):
             val = magnitudes[i]
             if val < threshold:
                 norm = 0.0
             else:
                 norm = (val - threshold) / (-threshold)
+            
+            # Boost progressively for higher bands since they naturally have less energy
+            boost = 1.0 + (i / (n_bands - 1)) * 2.2
+            norm = min(1.0, norm * boost)
+            
+            # Apply compression to make the movement more active and visible
+            norm = math.pow(norm, 0.75)
             self._target_values[i] = norm
 
     def _start_timer(self):

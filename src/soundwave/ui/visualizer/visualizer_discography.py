@@ -29,6 +29,11 @@ class VisualizerDiscographyMixin:
             if self._show_discography:
                 self._populate_discography()
             self._discography_revealer.set_reveal_child(self._show_discography)
+            
+            if hasattr(self, "_drawing_area") and self._drawing_area:
+                self._drawing_area.queue_draw()
+            if hasattr(self, "_bars_container") and self._bars_container:
+                self._bars_container.set_visible(not self._show_discography)
 
     def _populate_discography(self):
         clear_container(self._discography_box)

@@ -125,5 +125,12 @@ class TestSoundwaveCore(unittest.TestCase):
             waveform = generate_waveform_data("non_existent_file.mp3", num_points=10)
             self.assertEqual(waveform, [])
 
+    def test_onboarding_window_import(self):
+        import gi
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw
+        from soundwave.ui.window.onboarding import OnboardingWindow
+        self.assertTrue(issubclass(OnboardingWindow, Adw.Window))
+
 if __name__ == "__main__":
     unittest.main()

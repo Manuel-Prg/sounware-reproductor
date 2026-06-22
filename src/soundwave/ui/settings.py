@@ -4,7 +4,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 
 from pathlib import Path
-from soundwave.library.config import load_settings, save_setting, apply_theme
+from typing import Optional
+from soundwave.library.config.config import load_settings, save_setting, apply_theme
 
 
 class SettingsDialog(Adw.PreferencesWindow):
@@ -12,6 +13,8 @@ class SettingsDialog(Adw.PreferencesWindow):
         super().__init__(transient_for=parent_window, modal=True)
         self.parent_window = parent_window
         self.lastfm = lastfm
+        self._api_key_timeout = None
+        self._api_secret_timeout = None
 
         self.set_title("Ajustes")
         self.set_default_size(480, 540)
@@ -188,20 +191,70 @@ class SettingsDialog(Adw.PreferencesWindow):
         self.status_row.set_title("Estado")
         lastfm_group.add(self.status_row)
 
-        self.user_row = Adw.EntryRow()
-        self.user_row.set_title("Usuario")
-        lastfm_group.add(self.user_row)
+        # API Configuration (advanced)
+        api_key_row = Adw.ActionRow()
+        api_key_row.set_title("API Key")
+        api_key_row.set_subtitle("Clave de API de Last.fm (obtén una en last.fm/api)")
+        self.api_key_entry = Gtk.Entry()
+        self.api_key_entry.set_valign(Gtk.Align.CENTER)
+        self.api_key_entry.set_text(self.lastfm.api_key or "")
+        self.api_key_entry.set_hexpand(True)
+        api_key_row.add_suffix(self.api_key_entry)
+        lastfm_group.add(api_key_row)
 
-        self.pass_row = Adw.PasswordEntryRow()
-        self.pass_row.set_title("Contraseña")
-        lastfm_group.add(self.pass_row)
+        api_secret_row = Adw.ActionRow()
+        api_secret_row.set_title("API Secret")
+        api_secret_row.set_subtitle("Secreto de API de Last.fm")
+        self.api_secret_entry = Gtk.PasswordEntry()
+        self.api_secret_entry.set_valign(Gtk.Align.CENTER)
+        self.api_secret_entry.set_text(self.lastfm.api_secret or "")
+        self.api_secret_entry.set_hexpand(True)
+        api_secret_row.add_suffix(self.api_secret_entry)
+        lastfm_group.add(api_secret_row)
 
-        btn_row = Adw.ActionRow()
-        self.action_btn = Gtk.Button()
-        self.action_btn.set_valign(Gtk.Align.CENTER)
-        self.action_btn.connect("clicked", self._on_lastfm_action)
-        btn_row.add_suffix(self.action_btn)
-        lastfm_group.add(btn_row)
+        # Save button for API credentials
+        save_api_btn_row = Adw.ActionRow()
+        save_api_btn = Gtk.Button(label="Guardar credenciales API")
+        save_api_btn.set_valign(Gtk.Align.CENTER)
+        save_api_btn.set_css_classes(["suggested-action"])
+        save_api_btn.connect("clicked", self._on_save_api_credentials)
+        save_api_btn_row.add_suffix(save_api_btn)
+        lastfm_group.add(save_api_btn_row)
+
+        # OAuth authorization button
+        oauth_row = Adw.ActionRow()
+        oauth_row.set_title("Autorización")
+        oauth_row.set_subtitle("Autoriza Soundwave en Last.fm")
+        self.oauth_btn = Gtk.Button(label="Autorizar con Last.fm")
+        self.oauth_btn.set_valign(Gtk.Align.CENTER)
+        self.oauth_btn.set_css_classes(["suggested-action"])
+        self.oauth_btn.connect("clicked", self._on_oauth_start)
+        oauth_row.add_suffix(self.oauth_btn)
+        lastfm_group.add(oauth_row)
+
+        # Complete authorization button (hidden initially)
+        self.complete_oauth_row = Adw.ActionRow()
+        self.complete_oauth_row.set_title("Completar autorización")
+        self.complete_oauth_row.set_subtitle("Haz clic después de autorizar en el navegador")
+        self.complete_oauth_btn = Gtk.Button(label="Completar")
+        self.complete_oauth_btn.set_valign(Gtk.Align.CENTER)
+        self.complete_oauth_btn.set_css_classes(["suggested-action"])
+        self.complete_oauth_btn.connect("clicked", self._on_oauth_complete)
+        self.complete_oauth_row.add_suffix(self.complete_oauth_btn)
+        self.complete_oauth_row.set_visible(False)
+        lastfm_group.add(self.complete_oauth_row)
+
+        # Disconnect button (hidden initially)
+        self.disconnect_row = Adw.ActionRow()
+        self.disconnect_btn = Gtk.Button(label="Desconectar")
+        self.disconnect_btn.set_valign(Gtk.Align.CENTER)
+        self.disconnect_btn.set_css_classes(["destructive-action"])
+        self.disconnect_btn.connect("clicked", self._on_lastfm_disconnect)
+        self.disconnect_row.add_suffix(self.disconnect_btn)
+        self.disconnect_row.set_visible(False)
+        lastfm_group.add(self.disconnect_row)
+
+        self._oauth_token = None
 
         self._update_lastfm_ui()
 
@@ -308,54 +361,127 @@ class SettingsDialog(Adw.PreferencesWindow):
     def _update_lastfm_ui(self):
         if self.lastfm.connected:
             self.status_row.set_subtitle(f"Conectado como {self.lastfm.username}")
-            self.user_row.set_sensitive(False)
-            self.pass_row.set_sensitive(False)
-            self.user_row.set_text(self.lastfm.username or "")
-            self.pass_row.set_text("********")
-            self.action_btn.set_label("Desconectar")
-            self.action_btn.set_css_classes(["destructive-action"])
+            self.api_key_entry.set_sensitive(False)
+            self.api_secret_entry.set_sensitive(False)
+            self.oauth_btn.set_visible(False)
+            self.complete_oauth_row.set_visible(False)
+            self.disconnect_row.set_visible(True)
         else:
-            self.status_row.set_subtitle("Desconectado")
-            self.user_row.set_sensitive(True)
-            self.pass_row.set_sensitive(True)
-            self.user_row.set_text("")
-            self.pass_row.set_text("")
-            self.action_btn.set_label("Conectar")
-            self.action_btn.set_css_classes(["suggested-action"])
+            if not self.lastfm.configured:
+                self.status_row.set_subtitle("Configura API Key y Secret primero")
+                self.oauth_btn.set_sensitive(False)
+            else:
+                self.status_row.set_subtitle("Desconectado")
+                self.oauth_btn.set_sensitive(True)
+            self.api_key_entry.set_sensitive(True)
+            self.api_secret_entry.set_sensitive(True)
+            self.oauth_btn.set_visible(True)
+            self.complete_oauth_row.set_visible(False)
+            self.disconnect_row.set_visible(False)
+
+    def _on_api_key_changed(self, entry):
+        # Clear existing timeout
+        if self._api_key_timeout:
+            GLib.source_remove(self._api_key_timeout)
+
+        # Set new timeout to save after 300ms of inactivity
+        def save_api_key():
+            self.lastfm.api_key = entry.get_text().strip()
+            self.lastfm._save_config()
+            self._update_lastfm_ui()
+            self._api_key_timeout = None
+            return False
+
+        self._api_key_timeout = GLib.timeout_add(300, save_api_key)
+
+    def _on_api_secret_changed(self, entry):
+        # Clear existing timeout
+        if self._api_secret_timeout:
+            GLib.source_remove(self._api_secret_timeout)
+
+        # Set new timeout to save after 300ms of inactivity
+        def save_api_secret():
+            self.lastfm.api_secret = entry.get_text().strip()
+            self.lastfm._save_config()
+            self._update_lastfm_ui()
+            self._api_secret_timeout = None
+            return False
+
+        self._api_secret_timeout = GLib.timeout_add(300, save_api_secret)
+
+    def _on_save_api_credentials(self, btn):
+        """Manually save API credentials when button is clicked"""
+        self.lastfm.api_key = self.api_key_entry.get_text().strip()
+        self.lastfm.api_secret = self.api_secret_entry.get_text().strip()
+        self.lastfm._save_config()
+        self._update_lastfm_ui()
+        self._show_error("Credenciales de API guardadas correctamente")
+
+    def _on_oauth_start(self, btn):
+        """Start OAuth flow by getting token and opening browser"""
+        if not self.lastfm.configured:
+            self._show_error("Primero configura la API Key y API Secret de Last.fm.")
+            return
+
+        self.oauth_btn.set_sensitive(False)
+        self.status_row.set_subtitle("Obteniendo token de autorización...")
+
+        def get_token():
+            token = self.lastfm.get_auth_token()
+            GLib.idle_add(self._on_token_received, token)
+
+        import threading
+        threading.Thread(target=get_token, daemon=True).start()
+
+    def _on_token_received(self, token: Optional[str]):
+        if token:
+            self._oauth_token = token
+            auth_url = f"https://www.last.fm/api/auth/?api_key={self.lastfm.api_key}&token={token}"
+            import webbrowser
+            webbrowser.open(auth_url)
+            self.status_row.set_subtitle("Autoriza en el navegador, luego haz clic en 'Completar'")
+            self.oauth_btn.set_visible(False)
+            self.complete_oauth_row.set_visible(True)
+        else:
+            self.oauth_btn.set_sensitive(True)
+            self.status_row.set_subtitle("Error al obtener token")
+            self._show_error("No se pudo obtener el token de autorización. Verifica tus credenciales de API.")
+
+    def _on_oauth_complete(self, btn):
+        """Complete OAuth flow after user authorization"""
+        if not self._oauth_token:
+            self._show_error("No hay token de autorización. Inicia el proceso de nuevo.")
+            return
+
+        self.complete_oauth_btn.set_sensitive(False)
+        self.status_row.set_subtitle("Completando autorización...")
+
+        def complete_auth():
+            success = self.lastfm.complete_auth(self._oauth_token)
+            GLib.idle_add(self._on_oauth_complete_done, success)
+
+        import threading
+        threading.Thread(target=complete_auth, daemon=True).start()
+
+    def _on_oauth_complete_done(self, success: bool):
+        self.complete_oauth_btn.set_sensitive(True)
+        if success:
+            self._oauth_token = None
+            self._update_lastfm_ui()
+            self._show_error("Conectado a Last.fm correctamente")
+        else:
+            self.status_row.set_subtitle("Error al completar autorización")
+            self._show_error("No se pudo completar la autorización. Asegúrate de haber autorizado la aplicación en el navegador.")
+
+    def _on_lastfm_disconnect(self, btn):
+        """Disconnect from Last.fm"""
+        self.lastfm.disconnect()
+        self._update_lastfm_ui()
+        self._show_error("Desconectado de Last.fm")
 
     def _on_scan_clicked(self, btn):
         self.close()
         self.parent_window._open_folder_picker()
-
-    def _on_lastfm_action(self, btn):
-        if self.lastfm.connected:
-            self.lastfm.disconnect()
-            self._update_lastfm_ui()
-        else:
-            username = self.user_row.get_text().strip()
-            password = self.pass_row.get_text().strip()
-            if not username or not password:
-                self._show_error("Por favor, introduce tu usuario y contraseña.")
-                return
-
-            self.action_btn.set_sensitive(False)
-            self.status_row.set_subtitle("Conectando...")
-
-            # Run auth in background to avoid freezing the UI
-            def do_auth():
-                success = self.lastfm.authenticate(username, password)
-                GLib.idle_add(self._on_auth_complete, success)
-
-            import threading
-            threading.Thread(target=do_auth, daemon=True).start()
-
-    def _on_auth_complete(self, success: bool):
-        self.action_btn.set_sensitive(True)
-        if success:
-            self._update_lastfm_ui()
-        else:
-            self.status_row.set_subtitle("Error de conexión o credenciales incorrectas")
-            self._show_error("No se pudo iniciar sesión. Verifica tu usuario y contraseña.")
 
     def _show_error(self, message: str):
         toast = Adw.Toast.new(message)
@@ -411,8 +537,8 @@ class SettingsDialog(Adw.PreferencesWindow):
 
         def run_batch():
             try:
-                from soundwave.library.album_art import get_art_path, download_and_cache_album_art
-                from soundwave.library.database import Database
+                from soundwave.library.metadata.album_art import get_art_path, download_and_cache_album_art
+                from soundwave.library.database.database import Database
                 # Open a new, thread-local connection
                 thread_db = Database(db_path)
                 try:

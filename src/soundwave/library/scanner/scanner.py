@@ -5,8 +5,8 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
 
-from soundwave.library.database import Database, Song
-from soundwave.library.metadata import is_music_file, read_metadata
+from soundwave.library.database.database import Database, Song
+from soundwave.library.metadata.metadata import is_music_file, read_metadata
 
 
 ProgressCallback = Callable[[int, int, str], None]
@@ -82,14 +82,14 @@ class MusicScanner:
         song_id = self.db.add_song(song)
         song.id = song_id
         try:
-            from soundwave.library.album_art import get_art_path
+            from soundwave.library.metadata.album_art import get_art_path
             get_art_path(song_id, self.db)
         except Exception as e:
             print(f"Error pre-cacheando carátula para archivo único: {e}")
             
         # Pre-calculate waveform
         try:
-            from soundwave.library.waveform_helper import generate_waveform_data
+            from soundwave.library.utils.waveform_helper import generate_waveform_data
             db_song = self.db.get_song(song.id)
             if db_song and not db_song.waveform_data:
                 wave = generate_waveform_data(str(filepath), num_points=150)
@@ -147,7 +147,7 @@ class MusicScanner:
                 return "skipped"
             song_id = local_db.add_song(song)
             try:
-                from soundwave.library.album_art import get_art_path
+                from soundwave.library.metadata.album_art import get_art_path
                 get_art_path(song_id, local_db)
             except Exception as e:
                 print(f"Error pre-cacheando carátula en lote: {e}")
@@ -156,7 +156,7 @@ class MusicScanner:
             try:
                 db_song = local_db.get_song(song_id)
                 if db_song and not db_song.waveform_data:
-                    from soundwave.library.waveform_helper import generate_waveform_data
+                    from soundwave.library.utils.waveform_helper import generate_waveform_data
                     wave = generate_waveform_data(str(filepath), num_points=150)
                     if wave:
                         local_db.update_song_waveform(song_id, json.dumps(wave))

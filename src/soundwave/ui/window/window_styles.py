@@ -2,7 +2,7 @@
 
 from gi.repository import Gtk
 
-from soundwave.library.config import load_settings
+from soundwave.library.config.config import load_settings
 
 HOVER_COLORS = {
     "#1DB954": "#1ED760",

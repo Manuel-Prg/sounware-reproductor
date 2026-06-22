@@ -9,9 +9,9 @@ import json
 import threading
 
 from soundwave.player.engine import Player, PlayerState, RepeatMode, PlaybackPosition
-from soundwave.library.database import Song, Database
-from soundwave.ui.utils import hex_to_rgb, format_time
-from soundwave.ui.waveform_widgets import WaveformProgressBar, CAIRO_SUPPORTED
+from soundwave.library.database.database import Song, Database
+from soundwave.ui.components.utils import hex_to_rgb, format_time
+from soundwave.ui.components.waveform_widgets import WaveformProgressBar, CAIRO_SUPPORTED
 
 
 ToggleMiniCallback = Callable[[], None]
@@ -300,7 +300,7 @@ class PlayerBar(Gtk.CenterBox):
             texture = Gdk.Texture.new_from_filename(str(art_path))
             self._art_image.set_paintable(texture)
             try:
-                from soundwave.library.color_extract import get_theme_colors_from_art
+                from soundwave.library.metadata.color_extract import get_theme_colors_from_art
                 _, accent_hex, _ = get_theme_colors_from_art(art_path)
                 r, g, b = hex_to_rgb(accent_hex)
                 self._progress_scale.set_accent_color(r, g, b)
@@ -342,7 +342,7 @@ class PlayerBar(Gtk.CenterBox):
             return
 
         def run_generation():
-            from soundwave.library.waveform_helper import generate_waveform_data
+            from soundwave.library.utils.waveform_helper import generate_waveform_data
             wave = generate_waveform_data(song.filepath, num_points=150)
             if wave:
                 try:

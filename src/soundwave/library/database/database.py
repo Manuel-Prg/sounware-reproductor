@@ -126,6 +126,10 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_songs_album ON songs(album);
             CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs(genre);
             CREATE INDEX IF NOT EXISTS idx_songs_filepath ON songs(filepath);
+            CREATE INDEX IF NOT EXISTS idx_songs_album_artist ON songs(album_artist);
+            CREATE INDEX IF NOT EXISTS idx_songs_play_count ON songs(play_count);
+            CREATE INDEX IF NOT EXISTS idx_songs_last_played ON songs(last_played);
+            CREATE INDEX IF NOT EXISTS idx_songs_rating ON songs(rating);
         """)
         # Migración automática para bases de datos ya existentes
         existing_cols = {

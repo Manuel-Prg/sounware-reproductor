@@ -6,8 +6,8 @@ from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio
 from pathlib import Path
 from typing import Optional
 
-from soundwave.library.database import Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
-from soundwave.library.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
+from soundwave.library.database.database import Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
+from soundwave.library.metadata.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
 
 
 class LibraryCardsMixin:
@@ -343,7 +343,7 @@ class LibraryCardsMixin:
                 if s.id is not None:
                     cache_path = ART_CACHE_DIR / f"{s.id}.jpg"
                     cache_path.write_bytes(img_bytes)
-                    from soundwave.library.album_art import _export_art_to_tmp
+                    from soundwave.library.metadata.album_art import _export_art_to_tmp
                     _export_art_to_tmp(s.id, cache_path)
 
             first_song_path = Path(songs[0].filepath)

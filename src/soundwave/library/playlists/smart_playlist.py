@@ -1,5 +1,5 @@
 from typing import Optional
-from soundwave.library.database import Database, Song
+from soundwave.library.database.database import Database, Song
 
 
 RULE_FIELDS = {

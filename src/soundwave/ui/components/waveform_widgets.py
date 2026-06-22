@@ -11,7 +11,7 @@ except ImportError:
 from typing import Optional, Callable
 import math
 
-from soundwave.ui.utils import draw_rounded_rect
+from soundwave.ui.components.utils import draw_rounded_rect
 
 CAIRO_SUPPORTED = False
 try:

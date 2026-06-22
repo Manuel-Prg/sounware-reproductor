@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from soundwave.player.engine import Player, PlayerState, RepeatMode, PlaybackPosition
-from soundwave.library.database import Song
-from soundwave.library.color_extract import get_theme_colors_from_art
-from soundwave.ui.utils import format_time
+from soundwave.library.database.database import Song
+from soundwave.library.metadata.color_extract import get_theme_colors_from_art
+from soundwave.ui.components.utils import format_time
 
 
 RestoreWindowCallback = Callable[[], None]

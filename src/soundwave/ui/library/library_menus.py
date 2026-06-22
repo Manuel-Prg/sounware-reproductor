@@ -3,7 +3,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
-from soundwave.ui.library_dialogs import CreatePlaylistDialog
+from soundwave.ui.library.library_dialogs import CreatePlaylistDialog
 
 
 class LibraryMenusMixin:

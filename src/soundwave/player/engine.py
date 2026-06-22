@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 import random
 
-from soundwave.library.database import Song
+from soundwave.library.database.database import Song
 
 
 class PlayerState(Enum):
@@ -64,7 +64,7 @@ class Player:
         self._equalizer: Optional[Gst.Element] = None
         
         # Cargar configuración del ecualizador y ReplayGain
-        from soundwave.library.config import load_settings
+        from soundwave.library.config.config import load_settings
         settings = load_settings()
         self._equalizer_bands: list[float]     = settings.get("equalizer_bands", [0.0] * 10)
         self._equalizer_enabled: bool          = settings.get("equalizer_enabled", True)
@@ -378,7 +378,7 @@ class Player:
             n_bands = 10
         engine_bands = gains_for_engine(bands, n_bands)
         self._equalizer_bands = engine_bands
-        from soundwave.library.config import save_setting
+        from soundwave.library.config.config import save_setting
         save_setting("equalizer_bands", self._equalizer_bands)
 
         if self._equalizer and self._equalizer_enabled:
@@ -393,7 +393,7 @@ class Player:
 
     def set_equalizer_enabled(self, enabled: bool):
         self._equalizer_enabled = enabled
-        from soundwave.library.config import save_setting
+        from soundwave.library.config.config import save_setting
         save_setting("equalizer_enabled", enabled)
 
         if self._equalizer:
@@ -544,7 +544,7 @@ class Player:
 
     def _start_position_timer(self):
         self._stop_position_timer()
-        self._position_timer = GLib.timeout_add(250, self._poll_position)
+        self._position_timer = GLib.timeout_add(500, self._poll_position)
 
     def _stop_position_timer(self):
         if self._position_timer:

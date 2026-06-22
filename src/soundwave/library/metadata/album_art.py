@@ -4,8 +4,8 @@ import requests
 from pathlib import Path
 from typing import Optional
 
-from soundwave.library.database import Database
-from soundwave.library.metadata import (
+from soundwave.library.database.database import Database
+from soundwave.library.metadata.metadata import (
     extract_embedded_art, find_external_cover, get_art_mime_type
 )
 

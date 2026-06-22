@@ -4,8 +4,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Pango, GLib, Gdk
 
-from soundwave.library.database import Song
-from soundwave.ui.utils import clear_container
+from soundwave.library.database.database import Song
+from soundwave.ui.components.utils import clear_container
 
 
 def extract_main_artist(artist_name: str) -> str:

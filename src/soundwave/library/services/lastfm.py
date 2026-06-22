@@ -5,15 +5,18 @@ import time
 import urllib.request
 import urllib.parse
 import urllib.error
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "soundwave"
 CONFIG_FILE = CONFIG_DIR / "lastfm.json"
 
-API_KEY = os.environ.get("SOUNDWAVE_LASTFM_API_KEY", "")
-API_SECRET = os.environ.get("SOUNDWAVE_LASTFM_API_SECRET", "")
+# Default API credentials (can be overridden by user config)
+DEFAULT_API_KEY = ""
+DEFAULT_API_SECRET = ""
 BASE_URL = "https://ws.audioscrobbler.com/2.0/"
+AUTH_URL = "https://www.last.fm/api/auth/"
 
 
 class LastFMError(Exception):
@@ -24,6 +27,8 @@ class LastFmScrobbler:
     def __init__(self):
         self.session_key: Optional[str] = None
         self.username: Optional[str] = None
+        self.api_key: Optional[str] = None
+        self.api_secret: Optional[str] = None
         self._np_timestamp: Optional[int] = None
         self._current_artist: Optional[str] = None
         self._current_title: Optional[str] = None
@@ -35,28 +40,55 @@ class LastFmScrobbler:
 
     @property
     def configured(self) -> bool:
-        return bool(API_KEY and API_SECRET)
+        return bool(self.api_key and self.api_secret)
 
-    def authenticate(self, username: str, password: str) -> bool:
-        password_hash = hashlib.md5(password.encode()).hexdigest()
-        params = {
-            "method": "auth.getMobileSession",
-            "username": username,
-            "authToken": password_hash,
-            "api_key": API_KEY,
-        }
-        params["api_sig"] = self._sign(params)
-        params["format"] = "json"
+    def get_auth_token(self) -> Optional[str]:
+        """Get an authorization token for Last.fm OAuth"""
+        if not self.api_key or not self.api_secret:
+            return None
 
         try:
-            data = self._request(params)
-            session = data["session"]
+            token_params = {
+                "method": "auth.getToken",
+                "api_key": self.api_key,
+            }
+            token_params["api_sig"] = self._sign(token_params)
+            token_params["format"] = "json"
+
+            token_data = self._request(token_params)
+            return token_data["token"]
+        except (LastFMError, KeyError, urllib.error.URLError) as e:
+            print(f"Failed to get auth token: {e}")
+            return None
+
+    def complete_auth(self, token: str) -> bool:
+        """Complete OAuth authentication after user approval"""
+        if not self.api_key or not self.api_secret:
+            return False
+
+        try:
+            session_params = {
+                "method": "auth.getSession",
+                "token": token,
+                "api_key": self.api_key,
+            }
+            session_params["api_sig"] = self._sign(session_params)
+            session_params["format"] = "json"
+
+            session_data = self._request(session_params)
+            session = session_data["session"]
             self.session_key = session["key"]
             self.username = session["name"]
             self._save_config()
             return True
-        except (LastFMError, KeyError, urllib.error.URLError):
+        except (LastFMError, KeyError, urllib.error.URLError) as e:
+            print(f"Failed to complete auth: {e}")
             return False
+
+    def authenticate(self, username: str, password: str) -> bool:
+        # OAuth 2.0 flow for Last.fm (old methods are deprecated)
+        # This method is kept for compatibility but now uses OAuth
+        return False  # OAuth requires browser interaction, not username/password
 
     def disconnect(self):
         self.session_key = None
@@ -79,7 +111,7 @@ class LastFmScrobbler:
             "method": "track.updateNowPlaying",
             "artist": artist,
             "track": title,
-            "api_key": API_KEY,
+            "api_key": self.api_key,
             "sk": self.session_key,
         }
         if album:
@@ -108,7 +140,7 @@ class LastFmScrobbler:
             "artist": artist,
             "track": title,
             "timestamp": str(timestamp),
-            "api_key": API_KEY,
+            "api_key": self.api_key,
             "sk": self.session_key,
         }
         if album:
@@ -133,9 +165,13 @@ class LastFmScrobbler:
             resp = urllib.request.urlopen(req, timeout=10)
             result = json.loads(resp.read().decode())
             if result.get("error"):
-                raise LastFMError(result.get("message", "Unknown error"))
+                error_code = result.get("error")
+                error_msg = result.get("message", "Unknown error")
+                print(f"Last.fm API error {error_code}: {error_msg}")
+                raise LastFMError(f"{error_msg} (code: {error_code})")
             return result
         except urllib.error.URLError as e:
+            print(f"Last.fm network error: {e}")
             raise LastFMError(str(e))
 
     def _sign(self, params: dict) -> str:
@@ -143,19 +179,31 @@ class LastFmScrobbler:
             (k, v) for k, v in params.items() if k != "format"
         )
         sig_str = "".join(f"{k}{v}" for k, v in sorted_params)
-        sig_str += API_SECRET
+        sig_str += self.api_secret or ""
         return hashlib.md5(sig_str.encode()).hexdigest()
 
     def _load_config(self):
+        # Load from environment variables first (fallback)
+        self.api_key = os.environ.get("SOUNDWAVE_LASTFM_API_KEY", DEFAULT_API_KEY)
+        self.api_secret = os.environ.get("SOUNDWAVE_LASTFM_API_SECRET", DEFAULT_API_SECRET)
+        
+        # Then override from config file if exists
         if CONFIG_FILE.exists():
             try:
                 data = json.loads(CONFIG_FILE.read_text())
                 self.session_key = data.get("session_key")
                 self.username = data.get("username")
+                self.api_key = data.get("api_key", self.api_key)
+                self.api_secret = data.get("api_secret", self.api_secret)
             except (json.JSONDecodeError, KeyError):
                 pass
 
     def _save_config(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        data = {"session_key": self.session_key, "username": self.username}
+        data = {
+            "session_key": self.session_key,
+            "username": self.username,
+            "api_key": self.api_key,
+            "api_secret": self.api_secret
+        }
         CONFIG_FILE.write_text(json.dumps(data, indent=2))

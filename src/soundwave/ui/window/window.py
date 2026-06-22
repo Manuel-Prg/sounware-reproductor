@@ -6,20 +6,20 @@ from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 from pathlib import Path
 from typing import Optional
 
-from soundwave.library.database import Database, Song
-from soundwave.library.scanner import MusicScanner
-from soundwave.library.album_art import get_art_path
+from soundwave.library.database.database import Database, Song
+from soundwave.library.scanner.scanner import MusicScanner
+from soundwave.library.metadata.album_art import get_art_path
 from soundwave.player.engine import Player, PlayerState
-from soundwave.ui.player_bar import PlayerBar
-from soundwave.ui.library_view import LibraryView
-from soundwave.ui.search_bar import SearchBar
-from soundwave.ui.equalizer import EqualizerDialog
-from soundwave.ui.mini_player import MiniPlayer
+from soundwave.ui.player.player_bar import PlayerBar
+from soundwave.ui.library.library_view import LibraryView
+from soundwave.ui.components.search_bar import SearchBar
+from soundwave.ui.player.equalizer import EqualizerDialog
+from soundwave.ui.player.mini_player import MiniPlayer
 from soundwave.ui.settings import SettingsDialog
 from soundwave.ui.lyrics_view import LyricsView
-from soundwave.ui.window_styles import setup_window_css
-from soundwave.ui.window_sidebar import WindowSidebarMixin
-from soundwave.ui.window_library_scan import WindowLibraryScanMixin
+from soundwave.ui.window.window_styles import setup_window_css
+from soundwave.ui.window.window_sidebar import WindowSidebarMixin
+from soundwave.ui.window.window_library_scan import WindowLibraryScanMixin
 
 
 class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibraryScanMixin):
@@ -229,7 +229,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
         # If no cover found and auto-download is enabled, fetch it in the background
         if song and song.id is not None and art_path is None:
-            from soundwave.library.config import load_settings
+            from soundwave.library.config.config import load_settings
             if load_settings().get("download_missing_art", False):
                 self._start_art_download_for_song(song.id)
 
@@ -344,8 +344,8 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
     # --- Folder Watcher & Destructor ---
     def _start_folder_watcher(self):
-        from soundwave.library.watcher import FolderWatcher
-        from soundwave.library.config import load_settings
+        from soundwave.library.scanner.watcher import FolderWatcher
+        from soundwave.library.config.config import load_settings
 
         if self._watcher:
             self._watcher.stop()
@@ -377,7 +377,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
     # ──────────────────────────────────────────────────────────
 
     def _maybe_prompt_art_download(self):
-        from soundwave.library.config import load_settings, save_setting
+        from soundwave.library.config.config import load_settings, save_setting
         settings = load_settings()
         if "download_missing_art" in settings:
             return False  # Already configured, no prompt needed
@@ -412,8 +412,8 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
         def do_download():
             try:
-                from soundwave.library.album_art import download_and_cache_album_art
-                from soundwave.library.database import Database
+                from soundwave.library.metadata.album_art import download_and_cache_album_art
+                from soundwave.library.database.database import Database
                 thread_db = Database(db_path)
                 try:
                     art_path = download_and_cache_album_art(song_id, thread_db)
@@ -446,7 +446,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
     def refresh_current_artwork(self):
         song = self.player.get_current_song()
         if song and song.id is not None:
-            from soundwave.library.album_art import get_art_path
+            from soundwave.library.metadata.album_art import get_art_path
             art_path = get_art_path(song.id, self.db)
             self._player_bar.set_artwork_from_path(art_path)
             self._mini_player.set_artwork_from_path(art_path)

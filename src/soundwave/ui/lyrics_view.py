@@ -7,9 +7,9 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from soundwave.library.lyrics import get_lyrics, LyricsLine
-from soundwave.library.database import Song
-from soundwave.ui.utils import clear_container
+from soundwave.library.lyrics.lyrics import get_lyrics, LyricsLine
+from soundwave.library.database.database import Song
+from soundwave.ui.components.utils import clear_container
 
 
 class LyricsView(Gtk.Box):

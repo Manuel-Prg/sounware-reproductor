@@ -13,7 +13,7 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.oggopus import OggOpus
 from mutagen.id3 import ID3, APIC
 
-from soundwave.library.database import Song
+from soundwave.library.database.database import Song
 
 MUSIC_EXTENSIONS = {
     ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".mp4",

@@ -106,7 +106,7 @@ class WindowLibraryScanMixin:
             dialog.show()
 
     def _start_scan(self, directory: Path):
-        from soundwave.library.config import load_settings, save_setting
+        from soundwave.library.config.config import load_settings, save_setting
         settings = load_settings()
         dirs = settings.get("music_directories", [])
         try:

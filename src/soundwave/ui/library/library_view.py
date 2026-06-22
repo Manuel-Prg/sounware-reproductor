@@ -6,13 +6,13 @@ from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio
 from pathlib import Path
 from typing import Optional, Callable
 
-from soundwave.library.database import Database, Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
-from soundwave.library.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
+from soundwave.library.database.database import Database, Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
+from soundwave.library.metadata.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
 from soundwave.player.engine import Player, PlayerState
-from soundwave.ui.utils import clear_container
-from soundwave.ui.library_cards import LibraryCardsMixin
-from soundwave.ui.library_playlists import LibraryPlaylistsMixin
-from soundwave.ui.library_menus import LibraryMenusMixin
+from soundwave.ui.components.utils import clear_container
+from soundwave.ui.library.library_cards import LibraryCardsMixin
+from soundwave.ui.library.library_playlists import LibraryPlaylistsMixin
+from soundwave.ui.library.library_menus import LibraryMenusMixin
 
 
 PlaySongCallback = Callable[[Song, list[Song]], None]
@@ -175,10 +175,25 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._stack.add_named(scrolled, "smart")
 
     def _build_visualizer_view(self):
-        from soundwave.ui.visualizer import VisualizerView
-        self._visualizer_view = VisualizerView(self.db, self.player)
-        self._visualizer_view.connect_play_song(self._on_visualizer_play)
-        self._stack.add_named(self._visualizer_view, "visualizer")
+        # Defer visualizer creation until needed to improve startup time
+        self._visualizer_view = None
+        placeholder = Gtk.Label(label="Visualizador")
+        placeholder.set_halign(Gtk.Align.CENTER)
+        placeholder.set_valign(Gtk.Align.CENTER)
+        placeholder.add_css_class("dim-label")
+        self._stack.add_named(placeholder, "visualizer")
+
+    def _ensure_visualizer(self):
+        """Create visualizer on demand when first accessed"""
+        if self._visualizer_view is None:
+            from soundwave.ui.visualizer.visualizer import VisualizerView
+            self._visualizer_view = VisualizerView(self.db, self.player)
+            self._visualizer_view.connect_play_song(self._on_visualizer_play)
+            # Replace placeholder with actual visualizer
+            placeholder = self._stack.get_child_by_name("visualizer")
+            if placeholder:
+                self._stack.remove(placeholder)
+            self._stack.add_named(self._visualizer_view, "visualizer")
 
     def _on_visualizer_play(self, song: Song, queue: list[Song]):
         for cb in self._play_song_cbs:
@@ -269,7 +284,7 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
             self._smart_flow.append(overlay)
 
     def _show_smart_songs(self, name: str, rules: dict):
-        from soundwave.library.smart_playlist import evaluate_rules
+        from soundwave.library.playlists.smart_playlist import evaluate_rules
         songs = evaluate_rules(self.db, rules)
         self._title_label.set_label(name)
         clear_container(self._songs_list)
@@ -280,7 +295,7 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._all_songs = songs
 
     def _on_smart_play(self, rules: dict):
-        from soundwave.library.smart_playlist import evaluate_rules
+        from soundwave.library.playlists.smart_playlist import evaluate_rules
         songs = evaluate_rules(self.db, rules)
         if songs:
             for cb in self._play_song_cbs:
@@ -288,7 +303,7 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
 
     # --- Public API ---
     def show_view(self, view_id: str):
-        if hasattr(self, "_visualizer_view") and view_id != "visualizer":
+        if self._visualizer_view and view_id != "visualizer":
             self._visualizer_view.on_hide()
 
         self._current_view_id = view_id
@@ -324,7 +339,9 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
             self._populate_playlists()
             self._stack.set_visible_child_name("playlists")
         elif view_id == "visualizer":
-            self._visualizer_view.on_show()
+            self._ensure_visualizer()
+            if self._visualizer_view:
+                self._visualizer_view.on_show()
             self._stack.set_visible_child_name("visualizer")
 
     def show_search_results(self, results: list[Song]):
@@ -350,24 +367,76 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
     # --- Populate views ---
     def _populate_songs(self):
         clear_container(self._songs_list)
+        # Load songs in chunks to improve startup performance
         self._all_songs = self.db.get_all_songs()
-        for i, song in enumerate(self._all_songs):
+        # Load first 100 songs immediately, then load rest in background
+        initial_batch = self._all_songs[:100]
+        for song in initial_batch:
             row = self._build_song_row(song)
             self._songs_list.append(row)
+        # Load remaining songs in background
+        if len(self._all_songs) > 100:
+            GLib.idle_add(self._load_remaining_songs, 100)
+
+    def _load_remaining_songs(self, start_index: int) -> bool:
+        """Load remaining songs in batches to avoid blocking UI"""
+        batch_size = 50
+        end_index = min(start_index + batch_size, len(self._all_songs))
+        for i in range(start_index, end_index):
+            row = self._build_song_row(self._all_songs[i])
+            self._songs_list.append(row)
+        # Continue loading if there are more songs
+        if end_index < len(self._all_songs):
+            return True  # Continue calling this function
+        return False  # Stop calling
 
     def _populate_albums(self):
         clear_container(self._albums_flow)
         albums = self.db.get_albums()
-        for album in albums:
+        # Load first 50 albums immediately, then load rest in background
+        initial_batch = albums[:50]
+        for album in initial_batch:
             card = self._build_album_card(album)
             self._albums_flow.append(card)
+        # Load remaining albums in background
+        if len(albums) > 50:
+            GLib.idle_add(self._load_remaining_albums, albums, 50)
+
+    def _load_remaining_albums(self, albums: list, start_index: int) -> bool:
+        """Load remaining albums in batches to avoid blocking UI"""
+        batch_size = 25
+        end_index = min(start_index + batch_size, len(albums))
+        for i in range(start_index, end_index):
+            card = self._build_album_card(albums[i])
+            self._albums_flow.append(card)
+        # Continue loading if there are more albums
+        if end_index < len(albums):
+            return True  # Continue calling this function
+        return False  # Stop calling
 
     def _populate_artists(self):
         clear_container(self._artists_flow)
         artists = self.db.get_artists()
-        for artist in artists:
+        # Load first 50 artists immediately, then load rest in background
+        initial_batch = artists[:50]
+        for artist in initial_batch:
             card = self._build_artist_card(artist)
             self._artists_flow.append(card)
+        # Load remaining artists in background
+        if len(artists) > 50:
+            GLib.idle_add(self._load_remaining_artists, artists, 50)
+
+    def _load_remaining_artists(self, artists: list, start_index: int) -> bool:
+        """Load remaining artists in batches to avoid blocking UI"""
+        batch_size = 25
+        end_index = min(start_index + batch_size, len(artists))
+        for i in range(start_index, end_index):
+            card = self._build_artist_card(artists[i])
+            self._artists_flow.append(card)
+        # Continue loading if there are more artists
+        if end_index < len(artists):
+            return True  # Continue calling this function
+        return False  # Stop calling
 
     def _populate_genres(self):
         clear_container(self._genres_flow)

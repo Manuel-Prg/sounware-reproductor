@@ -5,8 +5,8 @@ from gi.repository import Gtk, Adw
 
 import hashlib
 
-from soundwave.ui.library_dialogs import CreatePlaylistDialog
-from soundwave.ui.utils import clear_container
+from soundwave.ui.library.library_dialogs import CreatePlaylistDialog
+from soundwave.ui.components.utils import clear_container
 
 
 class LibraryPlaylistsMixin:

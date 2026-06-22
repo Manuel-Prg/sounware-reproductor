@@ -12,12 +12,12 @@ import math
 from typing import Optional, Callable
 from pathlib import Path
 
-from soundwave.library.database import Song
-from soundwave.library.album_art import get_art_path
-from soundwave.library.color_extract import get_theme_colors_from_art
-from soundwave.ui.utils import hex_to_rgb, draw_rounded_rect, clear_container
-from soundwave.ui.visualizer_styles import load_visualizer_css
-from soundwave.ui.visualizer_discography import VisualizerDiscographyMixin, extract_main_artist
+from soundwave.library.database.database import Song
+from soundwave.library.metadata.album_art import get_art_path
+from soundwave.library.metadata.color_extract import get_theme_colors_from_art
+from soundwave.ui.components.utils import hex_to_rgb, draw_rounded_rect, clear_container
+from soundwave.ui.visualizer.visualizer_styles import load_visualizer_css
+from soundwave.ui.visualizer.visualizer_discography import VisualizerDiscographyMixin, extract_main_artist
 
 
 PlaySongCallback = Callable[[Song, list[Song]], None]

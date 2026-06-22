@@ -24,11 +24,11 @@ import sys
 
 from typing import Optional
 
-from soundwave.library.config import load_settings, apply_theme
-from soundwave.library.database import Database
-from soundwave.library.lastfm import LastFmScrobbler
+from soundwave.library.config.config import load_settings, apply_theme
+from soundwave.library.database.database import Database
+from soundwave.library.services.lastfm import LastFmScrobbler
 from soundwave.player.engine import Player, PlayerState
-from soundwave.ui.window import SoundwaveWindow
+from soundwave.ui.window.window import SoundwaveWindow
 from soundwave.core.plugin_manager import PluginManager
 
 # Re-override XDG_CONFIG_HOME to a dummy path for the rest of the application lifetime
@@ -57,33 +57,46 @@ class SoundwaveApp(Adw.Application):
             self._window.present()
             return
 
-        # Load and apply theme settings on startup
+        # Load and apply theme settings on startup (fast operation)
         settings = load_settings()
         theme = settings.get("theme", "system")
         apply_theme(theme)
 
+        # Initialize core components synchronously
         self._db = Database()
         self._player = Player()
         self._lastfm = LastFmScrobbler()
 
+        # Create window immediately
         self._window = SoundwaveWindow(self, self._db, self._player)
         self._window.set_lastfm(self._lastfm)
 
-        # Initialize and load plugins
+        # Present window first for fast startup
+        self._window.present()
+
+        # Defer heavy initialization to after window is shown
+        GLib.idle_add(self._initialize_deferred)
+
+    def _initialize_deferred(self):
+        """Initialize heavy components after window is shown"""
+        assert self._player is not None
+        assert self._window is not None
+
+        # Initialize and load plugins (deferred)
         self._plugin_manager = PluginManager(self, self._player, self._db, self._window)
         self._plugin_manager.load_plugins()
 
-        # Start MPRIS
+        # Start MPRIS (deferred)
         try:
             from soundwave.player.mpris import MprisService
             self._mpris = MprisService(self._player, raise_callback=lambda: self._window.present())
         except Exception as e:
             print(f"MPRIS no disponible: {e}", file=sys.stderr)
 
-        # GLib timeout for scrobbling
+        # GLib timeout for scrobbling (deferred)
         GLib.timeout_add_seconds(30, self._check_scrobble)
 
-        self._window.present()
+        return False  # Don't call again
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine):
         options = command_line.get_options_dict()

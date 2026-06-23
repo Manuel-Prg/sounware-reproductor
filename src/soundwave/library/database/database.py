@@ -71,7 +71,7 @@ class Database:
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
         DB_DIR.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(db_path))
+        self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
@@ -278,6 +278,19 @@ class Database:
                 SELECT * FROM songs WHERE artist = ?
                 ORDER BY album, disc_number, track_number
             """, (db_artist,)).fetchall()
+        return [self._row_to_song(r) for r in rows]
+
+    def get_songs_by_genre(self, genre: str) -> list[Song]:
+        if genre == NO_GENRE or not genre:
+            rows = self.conn.execute("""
+                SELECT * FROM songs WHERE genre = '' OR genre IS NULL OR genre = ?
+                ORDER BY artist, album, disc_number, track_number
+            """, (NO_GENRE,)).fetchall()
+        else:
+            rows = self.conn.execute("""
+                SELECT * FROM songs WHERE genre = ?
+                ORDER BY artist, album, disc_number, track_number
+            """, (genre,)).fetchall()
         return [self._row_to_song(r) for r in rows]
 
     def update_play_count(self, song_id: int):

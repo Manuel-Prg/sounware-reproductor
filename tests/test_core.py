@@ -157,5 +157,39 @@ class TestSoundwaveCore(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir)
 
+    def test_get_songs_by_genre(self):
+        from soundwave.library.database import Database, NO_GENRE
+        import tempfile
+        import shutil
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = Path(temp_dir) / "test_genre.db"
+        try:
+            db = Database(db_path)
+            db.conn.execute("""
+                INSERT INTO songs (filepath, title, artist, album, genre)
+                VALUES 
+                ('g1.mp3', 'Song 1', 'Artist A', 'Album X', 'Rock'),
+                ('g2.mp3', 'Song 2', 'Artist B', 'Album Y', ''),
+                ('g3.mp3', 'Song 3', 'Artist C', 'Album Z', NULL),
+                ('g4.mp3', 'Song 4', 'Artist D', 'Album W', 'Jazz')
+            """)
+            db.conn.commit()
+
+            rock_songs = db.get_songs_by_genre("Rock")
+            self.assertEqual(len(rock_songs), 1)
+            self.assertEqual(rock_songs[0].title, "Song 1")
+
+            jazz_songs = db.get_songs_by_genre("Jazz")
+            self.assertEqual(len(jazz_songs), 1)
+            self.assertEqual(jazz_songs[0].title, "Song 4")
+
+            no_genre_songs = db.get_songs_by_genre(NO_GENRE)
+            self.assertEqual(len(no_genre_songs), 2)
+            titles = {s.title for s in no_genre_songs}
+            self.assertEqual(titles, {"Song 2", "Song 3"})
+        finally:
+            shutil.rmtree(temp_dir)
+
 if __name__ == "__main__":
     unittest.main()

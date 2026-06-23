@@ -376,6 +376,13 @@ APP_CSS_TEMPLATE = """
         }
         .song-row:selected {
             background-color: alpha(@accent_bg_color, 0.15);
+            color: @window_fg_color;
+        }
+        .song-row:selected label {
+            color: @window_fg_color;
+        }
+        .song-row:selected label.subtitle {
+            color: alpha(@window_fg_color, 0.6);
         }
         .equalizer-slider {
             min-height: 120px;
@@ -446,6 +453,13 @@ APP_CSS_TEMPLATE = """
         }
         .songs-list > row:selected {
             background-color: alpha(@accent_bg_color, 0.15);
+            color: @window_fg_color;
+        }
+        .songs-list > row:selected label {
+            color: @window_fg_color;
+        }
+        .songs-list > row:selected label.subtitle {
+            color: alpha(@window_fg_color, 0.6);
         }
         .lyrics-line {
             font-size: 16px;

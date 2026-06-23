@@ -260,12 +260,18 @@ class MiniPlayer(Gtk.Window):
             border-radius: 2px;
             background-color: alpha(currentColor, 0.15);
             transition: background-color 0.6s ease;
+            border: none;
+            outline: none;
+            box-shadow: none;
         }
         .mini-player-scale highlight {
             min-height: 4px;
             border-radius: 2px;
             background-color: @accent_bg_color;
             transition: background-color 0.6s ease;
+            border: none;
+            outline: none;
+            box-shadow: none;
         }
         .mini-player-scale slider {
             min-height: 10px;
@@ -274,6 +280,7 @@ class MiniPlayer(Gtk.Window):
             background-color: @accent_bg_color;
             box-shadow: none;
             border: none;
+            outline: none;
             transition: background-color 0.6s ease;
         }
         """
@@ -336,14 +343,21 @@ class MiniPlayer(Gtk.Window):
         }}
         .mini-player-scale trough {{
             background-color: alpha({fg_hex}, 0.18);
+            border: none;
+            outline: none;
+            box-shadow: none;
         }}
         .mini-player-scale highlight {{
             background-color: {accent_hex};
+            border: none;
+            outline: none;
+            box-shadow: none;
         }}
         .mini-player-scale slider {{
             background-color: {accent_hex};
             box-shadow: none;
             border: none;
+            outline: none;
         }}
         .mini-player-repeat-active {{
             color: {accent_hex};
@@ -394,14 +408,21 @@ class MiniPlayer(Gtk.Window):
         }
         .mini-player-scale trough {
             background-color: alpha(currentColor, 0.15);
+            border: none;
+            outline: none;
+            box-shadow: none;
         }
         .mini-player-scale highlight {
             background-color: @accent_bg_color;
+            border: none;
+            outline: none;
+            box-shadow: none;
         }
         .mini-player-scale slider {
             background-color: @accent_bg_color;
             box-shadow: none;
             border: none;
+            outline: none;
         }
         .mini-player-repeat-active {
             color: @accent_bg_color;

@@ -21,16 +21,18 @@ NavigateAlbumCallback = Callable[[], None]
 
 
 class PlayerBar(Gtk.CenterBox):
-    def __init__(self, player: Player, db: Optional[Database] = None):
+    def __init__(self, player: Player, db: Optional[Database] = None, lastfm=None):
         super().__init__()
         self._player = player
         self._db = db
+        self._lastfm = lastfm
         self._toggle_mini_cbs: list[ToggleMiniCallback] = []
         self._show_eq_cbs: list[ShowEqualizerCallback] = []
         self._toggle_lyrics_cbs: list[ToggleLyricsCallback] = []
         self._navigate_album_cbs: list[NavigateAlbumCallback] = []
         self._toggle_fullscreen_cbs: list[Callable] = []
         self._toggle_sidebar_cbs: list[Callable] = []
+        self._is_loved = False
 
         self.set_css_classes(["player-bar"])
         self.set_size_request(-1, 72)
@@ -175,6 +177,15 @@ class PlayerBar(Gtk.CenterBox):
         self._lyrics_btn.connect("toggled", lambda b: self._emit_toggle_lyrics())
         right_box.append(self._lyrics_btn)
 
+        # Love button (Last.fm)
+        self._love_button = Gtk.ToggleButton()
+        self._love_button.set_child(Gtk.Image.new_from_icon_name("non-starred-symbolic"))
+        self._love_button.set_css_classes(["flat", "circular"])
+        self._love_button.set_tooltip_text("Favorito (Last.fm)")
+        self._love_button.set_visible(False)  # Hidden until connected to Last.fm
+        self._love_button.connect("toggled", self._on_love_toggled)
+        right_box.append(self._love_button)
+
         # Equalizer button
         self._eq_button = Gtk.Button.new_from_icon_name("preferences-desktop-sound-symbolic")
         self._eq_button.set_css_classes(["flat", "circular"])
@@ -280,6 +291,63 @@ class PlayerBar(Gtk.CenterBox):
 
     def _on_shuffle_toggled(self, button):
         self._player.toggle_shuffle()
+
+    def _on_love_toggled(self, button):
+        """Handle love/unlove track for Last.fm"""
+        if not self._lastfm or not self._lastfm.connected:
+            button.set_active(False)
+            return
+
+        song = self._player.get_current_song()
+        if not song:
+            button.set_active(False)
+            return
+
+        def toggle_love():
+            if button.get_active():
+                success = self._lastfm.love_track(song.display_artist, song.display_title)
+                if success:
+                    self._is_loved = True
+                    GLib.idle_add(self._update_love_button_icon, True)
+                    GLib.idle_add(self._show_love_toast, "Canción añadida a favoritos")
+                else:
+                    GLib.idle_add(button.set_active, False)
+            else:
+                success = self._lastfm.unlove_track(song.display_artist, song.display_title)
+                if success:
+                    self._is_loved = False
+                    GLib.idle_add(self._update_love_button_icon, False)
+                    GLib.idle_add(self._show_love_toast, "Canción eliminada de favoritos")
+                else:
+                    GLib.idle_add(button.set_active, True)
+
+        import threading
+        threading.Thread(target=toggle_love, daemon=True).start()
+
+    def _update_love_button_icon(self, loved: bool):
+        """Update the love button icon based on state"""
+        img = self._love_button.get_child()
+        if isinstance(img, Gtk.Image):
+            if loved:
+                img.set_from_icon_name("starred-symbolic")
+                self._love_button.set_tooltip_text("Eliminar de favoritos")
+            else:
+                img.set_from_icon_name("non-starred-symbolic")
+                self._love_button.set_tooltip_text("Añadir a favoritos")
+
+    def _show_love_toast(self, message: str):
+        """Show a toast message for love action"""
+        # This would need to be connected to the window's toast overlay
+        # For now, we'll just print it
+        print(f"[Last.fm] {message}")
+
+    def set_lastfm(self, lastfm):
+        """Set the Last.fm instance and update UI"""
+        self._lastfm = lastfm
+        if lastfm and lastfm.connected:
+            self._love_button.set_visible(True)
+        else:
+            self._love_button.set_visible(False)
 
     # --- State updates ---
     def _on_state_changed(self, state: PlayerState):

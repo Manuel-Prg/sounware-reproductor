@@ -1,7 +1,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Gio
 
 from pathlib import Path
 from typing import Optional
@@ -116,6 +116,16 @@ class SettingsDialog(Adw.PreferencesWindow):
         scan_row.add_suffix(scan_btn)
         library_group.add(scan_row)
 
+        # Action row: Re-scan library
+        rescan_row = Adw.ActionRow()
+        rescan_row.set_title("Actualizar / Re-escanear biblioteca")
+        rescan_row.set_subtitle("Busca música nueva o eliminada en las carpetas de tu colección")
+        rescan_btn = Gtk.Button(label="Re-escanear")
+        rescan_btn.set_valign(Gtk.Align.CENTER)
+        rescan_btn.connect("clicked", self._on_rescan_clicked)
+        rescan_row.add_suffix(rescan_btn)
+        library_group.add(rescan_row)
+
         # Album art download toggle
         art_download_row = Adw.SwitchRow()
         art_download_row.set_title("Descargar carátulas faltantes")
@@ -165,12 +175,17 @@ class SettingsDialog(Adw.PreferencesWindow):
 
         def on_replaygain_changed(row, pspec):
             selected = row.get_selected()
+            mode = "off"
             if selected == 0:
-                save_setting("replaygain_mode", "off")
+                mode = "off"
             elif selected == 1:
-                save_setting("replaygain_mode", "track")
+                mode = "track"
             elif selected == 2:
-                save_setting("replaygain_mode", "album")
+                mode = "album"
+            save_setting("replaygain_mode", mode)
+            if hasattr(self.parent_window, "player") and self.parent_window.player:
+                self.parent_window.player._replaygain_mode = mode
+                self.parent_window.player._apply_volume_with_gain()
 
         replaygain_row.connect("notify::selected", on_replaygain_changed)
         audio_group.add(replaygain_row)
@@ -187,7 +202,10 @@ class SettingsDialog(Adw.PreferencesWindow):
         crossfade_row.set_value(current_crossfade)
 
         def on_crossfade_changed(row, pspec):
-            save_setting("crossfade_duration", row.get_value())
+            val = row.get_value()
+            save_setting("crossfade_duration", val)
+            if hasattr(self.parent_window, "player") and self.parent_window.player:
+                self.parent_window.player._crossfade_duration = val
 
         crossfade_row.connect("notify::value", on_crossfade_changed)
         audio_group.add(crossfade_row)
@@ -220,6 +238,45 @@ class SettingsDialog(Adw.PreferencesWindow):
 
         eq_bands_row.connect("notify::selected", on_eq_bands_changed)
         audio_group.add(eq_bands_row)
+
+        # Group: Playlists M3U8
+        playlists_group = Adw.PreferencesGroup()
+        playlists_group.set_title("Listas de reproducción")
+        playlists_group.set_description("Importa y exporta listas de reproducción de la biblioteca")
+        general_page.add(playlists_group)
+
+        # Switch row: also export file based formats
+        export_file_based_row = Adw.SwitchRow()
+        export_file_based_row.set_title("También exportar listas de reproducción basada en archivos (.m3u8, .pls, etc.)")
+        export_file_based_row.set_subtitle("Exporta archivos adicionales cuando exportes tus listas de reproducción")
+        settings = load_settings()
+        export_file_based_row.set_active(settings.get("export_file_based_playlists", False))
+
+        def on_export_file_based_toggled(row, pspec):
+            save_setting("export_file_based_playlists", row.get_active())
+
+        export_file_based_row.connect("notify::active", on_export_file_based_toggled)
+        playlists_group.add(export_file_based_row)
+
+        # Action row: Import playlist
+        import_playlist_row = Adw.ActionRow()
+        import_playlist_row.set_title("Importar lista de reproducción")
+        import_playlist_row.set_subtitle("Importa una lista de reproducción desde un archivo .m3u8 o .m3u")
+        import_playlist_btn = Gtk.Button(label="Importar...")
+        import_playlist_btn.set_valign(Gtk.Align.CENTER)
+        import_playlist_btn.connect("clicked", self._on_import_playlist_clicked)
+        import_playlist_row.add_suffix(import_playlist_btn)
+        playlists_group.add(import_playlist_row)
+
+        # Action row: Export playlist
+        export_playlist_row = Adw.ActionRow()
+        export_playlist_row.set_title("Exportar lista de reproducción")
+        export_playlist_row.set_subtitle("Exporta una lista de reproducción de la biblioteca a formato M3U8")
+        export_playlist_btn = Gtk.Button(label="Exportar...")
+        export_playlist_btn.set_valign(Gtk.Align.CENTER)
+        export_playlist_btn.connect("clicked", self._on_export_playlist_clicked)
+        export_playlist_row.add_suffix(export_playlist_btn)
+        playlists_group.add(export_playlist_row)
 
         # Group 4: Help / Onboarding
         help_group = Adw.PreferencesGroup()
@@ -314,6 +371,35 @@ class SettingsDialog(Adw.PreferencesWindow):
         self.disconnect_row.add_suffix(self.disconnect_btn)
         self.disconnect_row.set_visible(False)
         lastfm_group.add(self.disconnect_row)
+
+        # User statistics section (hidden initially)
+        self.stats_group = Adw.PreferencesGroup()
+        self.stats_group.set_title("Estadísticas de Last.fm")
+        self.stats_group.set_description("Tu actividad en Last.fm")
+        self.stats_group.set_visible(False)
+        conn_page.add(self.stats_group)
+
+        # Play count
+        self.play_count_row = Adw.ActionRow()
+        self.play_count_row.set_title("Reproducciones totales")
+        self.play_count_row.set_subtitle("Cargando...")
+        self.stats_group.add(self.play_count_row)
+
+        # Refresh stats button
+        refresh_stats_row = Adw.ActionRow()
+        refresh_stats_row.set_title("Actualizar estadísticas")
+        refresh_stats_btn = Gtk.Button(label="Actualizar")
+        refresh_stats_btn.set_valign(Gtk.Align.CENTER)
+        refresh_stats_btn.connect("clicked", self._on_refresh_stats)
+        refresh_stats_row.add_suffix(refresh_stats_btn)
+        self.stats_group.add(refresh_stats_row)
+
+        # Recent tracks section
+        self.recent_group = Adw.PreferencesGroup()
+        self.recent_group.set_title("Canciones recientes")
+        self.recent_group.set_description("Tus últimas reproducciones en Last.fm")
+        self.recent_group.set_visible(False)
+        conn_page.add(self.recent_group)
 
         self._oauth_token = None
 
@@ -427,6 +513,10 @@ class SettingsDialog(Adw.PreferencesWindow):
             self.oauth_btn.set_visible(False)
             self.complete_oauth_row.set_visible(False)
             self.disconnect_row.set_visible(True)
+            self.stats_group.set_visible(True)
+            self.recent_group.set_visible(True)
+            # Load stats automatically when connected
+            self._load_lastfm_stats()
         else:
             if not self.lastfm.configured:
                 self.status_row.set_subtitle("Configura API Key y Secret primero")
@@ -439,6 +529,8 @@ class SettingsDialog(Adw.PreferencesWindow):
             self.oauth_btn.set_visible(True)
             self.complete_oauth_row.set_visible(False)
             self.disconnect_row.set_visible(False)
+            self.stats_group.set_visible(False)
+            self.recent_group.set_visible(False)
 
     def _on_api_key_changed(self, entry):
         # Clear existing timeout
@@ -544,6 +636,11 @@ class SettingsDialog(Adw.PreferencesWindow):
         self.close()
         self.parent_window._open_folder_picker()
 
+    def _on_rescan_clicked(self, btn):
+        self.close()
+        if hasattr(self.parent_window, "_start_rescan"):
+            self.parent_window._start_rescan()
+
     def _on_onboarding_clicked(self, btn):
         self.close()
         from soundwave.ui.window.onboarding import OnboardingWindow
@@ -641,3 +738,194 @@ class SettingsDialog(Adw.PreferencesWindow):
             self.batch_art_row.set_subtitle(f"¡Descarga completada! {downloaded} carátula(s) nuevas.")
             if hasattr(self.parent_window, "_library_view"):
                 GLib.idle_add(self.parent_window._library_view.refresh)
+
+    def _load_lastfm_stats(self):
+        """Load Last.fm user statistics in background"""
+        if not self.lastfm.connected:
+            return
+
+        def load_stats():
+            try:
+                user_info = self.lastfm.get_user_info()
+                recent_tracks = self.lastfm.get_recent_tracks(limit=5)
+                GLib.idle_add(self._update_stats_display, user_info, recent_tracks)
+            except Exception as e:
+                print(f"[Settings] Error loading Last.fm stats: {e}")
+                GLib.idle_add(self.play_count_row.set_subtitle, "Error al cargar estadísticas")
+
+        import threading
+        threading.Thread(target=load_stats, daemon=True).start()
+
+    def _update_stats_display(self, user_info: Optional[dict], recent_tracks: list):
+        """Update the UI with Last.fm statistics"""
+        if user_info:
+            play_count = user_info.get("playcount", "0")
+            self.play_count_row.set_subtitle(f"{play_count} reproducciones")
+
+        # Clear previous recent tracks
+        for child in self.recent_group:
+            self.recent_group.remove(child)
+
+        # Add recent tracks
+        if recent_tracks:
+            for track in recent_tracks:
+                track_name = track.get("name", "Desconocido")
+                artist_name = track.get("artist", {}).get("name", "Desconocido")
+                row = Adw.ActionRow()
+                row.set_title(track_name)
+                row.set_subtitle(artist_name)
+                row.set_sensitive(False)
+                self.recent_group.add(row)
+        else:
+            row = Adw.ActionRow()
+            row.set_title("No hay canciones recientes")
+            row.set_sensitive(False)
+            self.recent_group.add(row)
+
+    def _on_refresh_stats(self, btn):
+        """Refresh Last.fm statistics"""
+        self.play_count_row.set_subtitle("Actualizando...")
+        self._load_lastfm_stats()
+        self._show_error("Estadísticas actualizadas")
+
+    def _on_import_playlist_clicked(self, btn):
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog.new()
+            dialog.set_title("Importar lista de reproducción")
+            
+            f = Gtk.FileFilter()
+            f.set_name("Listas de reproducción M3U8/M3U (*.m3u8, *.m3u)")
+            f.add_pattern("*.m3u8")
+            f.add_pattern("*.m3u")
+            
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(f)
+            dialog.set_filters(filters)
+
+            def on_file_selected(dialog, result):
+                try:
+                    file = dialog.open_finish(result)
+                    if file:
+                        path = Path(file.get_path())
+                        self._do_import_playlist(path)
+                except GLib.Error as e:
+                    print("Importación cancelada o fallida:", e)
+
+            dialog.open(self, None, on_file_selected)
+        else:
+            dialog = Gtk.FileChooserNative.new(
+                title="Importar lista de reproducción",
+                parent=self,
+                action=Gtk.FileChooserAction.OPEN,
+                accept_label="Importar",
+                cancel_label="Cancelar"
+            )
+            f = Gtk.FileFilter()
+            f.set_name("Listas de reproducción M3U8/M3U (*.m3u8, *.m3u)")
+            f.add_pattern("*.m3u8")
+            f.add_pattern("*.m3u")
+            dialog.add_filter(f)
+
+            def on_response(dialog, response_id):
+                if response_id == Gtk.ResponseType.ACCEPT:
+                    file = dialog.get_file()
+                    if file:
+                        path = Path(file.get_path())
+                        self._do_import_playlist(path)
+                self._file_chooser = None
+
+            dialog.connect("response", on_response)
+            dialog.show()
+
+    def _do_import_playlist(self, path: Path):
+        try:
+            from soundwave.library.playlists.m3u8 import import_playlist_from_m3u8
+            playlist_name = import_playlist_from_m3u8(self.parent_window.db, path)
+            self._show_error(f"Lista '{playlist_name}' importada con éxito.")
+            # Refresh library view
+            if hasattr(self.parent_window, "_library_view"):
+                GLib.idle_add(self.parent_window._library_view.refresh)
+        except Exception as e:
+            print(f"[Import M3U8] Error: {e}")
+            self._show_error(f"Error al importar: {e}")
+
+    def _on_export_playlist_clicked(self, btn):
+        playlists = self.parent_window.db.get_playlists()
+        if not playlists:
+            self._show_error("No hay listas de reproducción en la biblioteca para exportar.")
+            return
+
+        from soundwave.ui.library.library_dialogs import ExportPlaylistDialog
+        dialog = ExportPlaylistDialog(self, playlists, self._prompt_save_playlist)
+        dialog.present()
+
+    def _prompt_save_playlist(self, playlist):
+        if hasattr(Gtk, "FileDialog"):
+            dialog = Gtk.FileDialog.new()
+            dialog.set_title(f"Exportar lista '{playlist.name}'")
+            dialog.set_initial_name(f"{playlist.name}.m3u8")
+            
+            f = Gtk.FileFilter()
+            f.set_name("Lista de reproducción M3U8 (*.m3u8)")
+            f.add_pattern("*.m3u8")
+            
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(f)
+            dialog.set_filters(filters)
+
+            def on_save_selected(dialog, result):
+                try:
+                    file = dialog.save_finish(result)
+                    if file:
+                        path = Path(file.get_path())
+                        self._do_export_playlist(playlist, path)
+                except GLib.Error as e:
+                    print("Exportación cancelada o fallida:", e)
+
+            dialog.save(self, None, on_save_selected)
+        else:
+            dialog = Gtk.FileChooserNative.new(
+                title=f"Exportar lista '{playlist.name}'",
+                parent=self,
+                action=Gtk.FileChooserAction.SAVE,
+                accept_label="Guardar",
+                cancel_label="Cancelar"
+            )
+            dialog.set_current_name(f"{playlist.name}.m3u8")
+            
+            f = Gtk.FileFilter()
+            f.set_name("Lista de reproducción M3U8 (*.m3u8)")
+            f.add_pattern("*.m3u8")
+            dialog.add_filter(f)
+
+            def on_response(dialog, response_id):
+                if response_id == Gtk.ResponseType.ACCEPT:
+                    file = dialog.get_file()
+                    if file:
+                        path = Path(file.get_path())
+                        self._do_export_playlist(playlist, path)
+                self._file_chooser = None
+
+            dialog.connect("response", on_response)
+            dialog.show()
+
+    def _do_export_playlist(self, playlist, path: Path):
+        try:
+            from soundwave.library.playlists.m3u8 import export_playlist_to_m3u8
+            settings = load_settings()
+            also_export_file_based = settings.get("export_file_based_playlists", False)
+            
+            export_playlist_to_m3u8(
+                self.parent_window.db, 
+                playlist.id, 
+                path, 
+                also_export_file_based=also_export_file_based
+            )
+            
+            msg = f"Lista '{playlist.name}' exportada con éxito."
+            if also_export_file_based:
+                msg += " (Se exportaron archivos .m3u8 y .pls)"
+            self._show_error(msg)
+        except Exception as e:
+            print(f"[Export M3U8] Error: {e}")
+            self._show_error(f"Error al exportar: {e}")

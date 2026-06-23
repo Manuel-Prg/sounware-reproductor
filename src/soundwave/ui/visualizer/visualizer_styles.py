@@ -101,6 +101,12 @@ VISUALIZER_CSS = """
         .discography-song-duration-current {
             color: #1db954;
         }
+        .visualizer-audio-info {
+            font-size: 10pt;
+            color: rgba(255, 255, 255, 0.45);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            margin-top: 4px;
+        }
 """
 
 

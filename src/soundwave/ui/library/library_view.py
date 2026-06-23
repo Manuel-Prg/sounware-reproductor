@@ -13,13 +13,15 @@ from soundwave.ui.components.utils import clear_container
 from soundwave.ui.library.library_cards import LibraryCardsMixin
 from soundwave.ui.library.library_playlists import LibraryPlaylistsMixin
 from soundwave.ui.library.library_menus import LibraryMenusMixin
+from soundwave.ui.library.library_sorting import LibrarySortingMixin
+from soundwave.ui.library.library_album_details import LibraryAlbumDetailsMixin
 
 
 PlaySongCallback = Callable[[Song, list[Song]], None]
 QueueSongCallback = Callable[[Song], None]
 
 
-class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenusMixin):
+class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenusMixin, LibrarySortingMixin, LibraryAlbumDetailsMixin):
     def __init__(self, db: Database, player: Player):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.db = db
@@ -36,6 +38,12 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._title_label.set_css_classes(["title"])
         self._header.set_title_widget(self._title_label)
 
+        self._back_btn = Gtk.Button.new_from_icon_name("go-previous-symbolic")
+        self._back_btn.set_tooltip_text("Volver")
+        self._back_btn.connect("clicked", lambda b: self._on_back_clicked())
+        self._back_btn.set_visible(False)
+        self._header.pack_start(self._back_btn)
+
         self._create_playlist_btn = Gtk.Button.new_from_icon_name("list-add-symbolic")
         self._create_playlist_btn.set_tooltip_text("Crear lista de reproducción")
         self._create_playlist_btn.connect("clicked", lambda b: self._on_create_playlist_clicked())
@@ -46,6 +54,20 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self.search_entry.set_placeholder_text("Buscar canciones, artistas...")
         self.search_entry.set_size_request(240, -1)
         self._header.pack_end(self.search_entry)
+
+        # Sorting Options
+        self._song_sort_criteria = "title"
+        self._song_sort_order = "asc"
+        self._album_sort_criteria = "album"
+        self._album_sort_order = "asc"
+        self._current_playlist_id = None
+
+        self._sort_btn = Gtk.MenuButton()
+        self._sort_btn.set_icon_name("view-sort-ascending-symbolic")
+        self._sort_btn.set_tooltip_text("Ordenar")
+        self._sort_popover = Gtk.Popover()
+        self._sort_btn.set_popover(self._sort_popover)
+        self._header.pack_end(self._sort_btn)
 
         self.append(self._header)
 
@@ -63,6 +85,7 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         # Views
         self._build_songs_view()
         self._build_albums_view()
+        self._build_album_details_view()
         self._build_artists_view()
         self._build_genres_view()
         self._build_search_view()
@@ -71,14 +94,14 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._build_visualizer_view()
 
         self._stack.set_visible_child_name("songs")
+        self._update_sort_popover_content()
+
+
 
     PRESET_RULES = [
         ("Recién Añadido", "Canciones agregadas recientemente", "list-add-symbolic", {"recent": True}),
         ("Favoritos", "Canciones con mejor valoración", "emblem-favorite-symbolic", {"rating_min": 4}),
         ("Más Escuchadas", "Canciones con más reproducciones", "emblem-important-symbolic", {"most_played": True}),
-        ("Jazz", "Canciones del género Jazz", "audio-x-generic-symbolic", {"genre": "Jazz"}),
-        ("Rock", "Canciones del género Rock", "audio-x-generic-symbolic", {"genre": "Rock"}),
-        ("Electrónica", "Canciones del género Electrónica", "audio-x-generic-symbolic", {"genre": "Electronic"}),
     ]
 
     def _build_songs_view(self):
@@ -286,13 +309,27 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
     def _show_smart_songs(self, name: str, rules: dict):
         from soundwave.library.playlists.smart_playlist import evaluate_rules
         songs = evaluate_rules(self.db, rules)
+        self._previous_view_id = self._current_view_id
+        if hasattr(self, "_back_btn"):
+            self._back_btn.set_visible(True)
         self._title_label.set_label(name)
+        
+        self._current_playlist_id = None
+        self._all_songs = songs
+        self._sort_songs_list()
+        
         clear_container(self._songs_list)
-        for s in songs:
+        initial_batch = self._all_songs[:100]
+        for s in initial_batch:
             r = self._build_song_row(s)
             self._songs_list.append(r)
+        if len(self._all_songs) > 100:
+            GLib.idle_add(self._load_remaining_songs, 100)
+            
         self._stack.set_visible_child_name("songs")
-        self._all_songs = songs
+        if hasattr(self, "_sort_btn"):
+            self._sort_btn.set_visible(True)
+            self._update_sort_popover_content()
 
     def _on_smart_play(self, rules: dict):
         from soundwave.library.playlists.smart_playlist import evaluate_rules
@@ -301,14 +338,23 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
             for cb in self._play_song_cbs:
                 cb(songs[0], songs)
 
+    def _on_back_clicked(self):
+        if hasattr(self, "_previous_view_id") and self._previous_view_id:
+            self.show_view(self._previous_view_id)
+
     # --- Public API ---
     def show_view(self, view_id: str):
         if self._visualizer_view and view_id != "visualizer":
             self._visualizer_view.on_hide()
 
         self._current_view_id = view_id
+        if hasattr(self, "_back_btn"):
+            self._back_btn.set_visible(False)
         if hasattr(self, "_create_playlist_btn"):
             self._create_playlist_btn.set_visible(view_id == "playlists")
+
+        if hasattr(self, "_sort_btn"):
+            self._sort_btn.set_visible(view_id in ["all", "albums", "playlists", "smart"])
 
         self._title_label.set_label({
             "all": "Todas las canciones",
@@ -344,15 +390,25 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
                 self._visualizer_view.on_show()
             self._stack.set_visible_child_name("visualizer")
 
+        self._update_sort_popover_content()
+
     def show_search_results(self, results: list[Song]):
         if hasattr(self, "_visualizer_view"):
             self._visualizer_view.on_hide()
         self._title_label.set_label(f"Resultados: {len(results)}")
+        
+        self._current_playlist_id = None
+        self._all_songs = results
+        self._sort_songs_list()
+        
         clear_container(self._search_list)
-        for song in results:
+        for song in self._all_songs:
             row = self._build_song_row(song)
             self._search_list.append(row)
         self._stack.set_visible_child_name("search")
+        if hasattr(self, "_sort_btn"):
+            self._sort_btn.set_visible(True)
+            self._update_sort_popover_content()
 
     def refresh(self):
         self._all_songs = self.db.get_all_songs()
@@ -366,9 +422,11 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
 
     # --- Populate views ---
     def _populate_songs(self):
+        self._current_playlist_id = None
         clear_container(self._songs_list)
         # Load songs in chunks to improve startup performance
         self._all_songs = self.db.get_all_songs()
+        self._sort_songs_list()
         # Load first 100 songs immediately, then load rest in background
         initial_batch = self._all_songs[:100]
         for song in initial_batch:
@@ -380,19 +438,47 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
 
     def _load_remaining_songs(self, start_index: int) -> bool:
         """Load remaining songs in batches to avoid blocking UI"""
+        playlist_id = getattr(self, "_current_playlist_id", None)
         batch_size = 50
         end_index = min(start_index + batch_size, len(self._all_songs))
         for i in range(start_index, end_index):
-            row = self._build_song_row(self._all_songs[i])
+            row = self._build_song_row(self._all_songs[i], playlist_id=playlist_id)
             self._songs_list.append(row)
         # Continue loading if there are more songs
         if end_index < len(self._all_songs):
-            return True  # Continue calling this function
-        return False  # Stop calling
+            GLib.idle_add(self._load_remaining_songs, end_index)
+        return False  # Stop current invocation
 
     def _populate_albums(self):
         clear_container(self._albums_flow)
         albums = self.db.get_albums()
+
+        # Sort albums
+        criteria = getattr(self, "_album_sort_criteria", "album")
+        order = getattr(self, "_album_sort_order", "asc")
+        descending = (order == "desc")
+
+        def sort_key(a: dict):
+            if criteria == "album":
+                return (a.get("album") or "").lower()
+            elif criteria == "song_count":
+                return a.get("song_count") or 0
+            elif criteria == "total_duration":
+                return a.get("total_duration") or 0.0
+            elif criteria == "year":
+                return a.get("year") or 0
+            elif criteria == "date":
+                return a.get("added_at") or 0.0
+            elif criteria == "artist":
+                return (a.get("artist") or "").lower()
+            elif criteria == "album_artist":
+                return (a.get("album_artist") or "").lower()
+            elif criteria == "composer":
+                return (a.get("composer") or "").lower()
+            return (a.get("album") or "").lower()
+
+        albums.sort(key=sort_key, reverse=descending)
+
         # Load first 50 albums immediately, then load rest in background
         initial_batch = albums[:50]
         for album in initial_batch:
@@ -411,8 +497,8 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
             self._albums_flow.append(card)
         # Continue loading if there are more albums
         if end_index < len(albums):
-            return True  # Continue calling this function
-        return False  # Stop calling
+            GLib.idle_add(self._load_remaining_albums, albums, end_index)
+        return False  # Stop current invocation
 
     def _populate_artists(self):
         clear_container(self._artists_flow)
@@ -435,8 +521,8 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
             self._artists_flow.append(card)
         # Continue loading if there are more artists
         if end_index < len(artists):
-            return True  # Continue calling this function
-        return False  # Stop calling
+            GLib.idle_add(self._load_remaining_artists, artists, end_index)
+        return False  # Stop current invocation
 
     def _populate_genres(self):
         clear_container(self._genres_flow)
@@ -480,50 +566,13 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         for cb in self._play_song_cbs:
             cb(song, queue)
 
-    def _show_album_songs(self, album: dict):
-        songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
-        if not songs:
-            return
-        album_name = album.get("album", UNKNOWN_ALBUM)
-        artist_name = album.get("album_artist", "") or songs[0].display_artist
-        self._title_label.set_label(f"{album_name}")
-        clear_container(self._songs_list)
-        for s in songs:
-            r = self._build_song_row(s)
-            self._songs_list.append(r)
-        self._stack.set_visible_child_name("songs")
-        self._all_songs = songs
 
-    def _on_album_clicked(self, album: dict):
-        self._show_album_songs(album)
-
-    def _on_artist_selected_name(self, artist_name: str):
-        songs = self.db.get_songs_by_artist(artist_name)
-        if songs:
-            self._title_label.set_label(artist_name)
-            clear_container(self._songs_list)
-            for s in songs:
-                r = self._build_song_row(s)
-                self._songs_list.append(r)
-            self._stack.set_visible_child_name("songs")
-            self._all_songs = songs
-
-    def _on_genre_selected(self, genre: str):
-        if genre == NO_GENRE:
-            songs = [s for s in self.db.get_all_songs() if not s.genre or s.genre.strip() == ""]
-        else:
-            songs = self.db.search_songs(genre)
-        if songs:
-            self._title_label.set_label(f"Género: {genre}")
-            clear_container(self._songs_list)
-            for s in songs:
-                r = self._build_song_row(s)
-                self._songs_list.append(r)
-            self._stack.set_visible_child_name("songs")
-            self._all_songs = songs
 
     def _update_highlight(self):
-        for listbox in [self._songs_list, self._search_list]:
+        lists_to_check = [self._songs_list, self._search_list]
+        if hasattr(self, "_album_details_list"):
+            lists_to_check.append(self._album_details_list)
+        for listbox in lists_to_check:
             child = listbox.get_first_child()
             while child:
                 song = getattr(child, "_song", None)

@@ -460,6 +460,40 @@ APP_CSS_TEMPLATE = """
             font-weight: bold;
             font-size: 18px;
         }
+        .album-details-header {
+            padding: 16px 0;
+            border-bottom: 1px solid alpha(currentColor, 0.08);
+            margin-bottom: 16px;
+        }
+        .album-details-type {
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            color: alpha(currentColor, 0.6);
+        }
+        .album-details-title {
+            font-size: 32px;
+            font-weight: 800;
+            margin: 4px 0;
+            line-height: 1.2;
+        }
+        .album-details-artist {
+            font-size: 16px;
+            font-weight: bold;
+            color: @accent_bg_color;
+        }
+        .album-details-meta {
+            font-size: 13px;
+            color: alpha(currentColor, 0.55);
+            margin-top: 4px;
+        }
+        .audio-info-label {
+            font-size: 10px;
+            color: alpha(currentColor, 0.5);
+            font-weight: bold;
+            margin-top: 2px;
+            margin-bottom: 2px;
+        }
 """
 
 

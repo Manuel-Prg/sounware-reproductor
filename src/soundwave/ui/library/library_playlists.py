@@ -133,13 +133,27 @@ class LibraryPlaylistsMixin:
             s = self.db.get_song(sid)
             if s:
                 songs.append(s)
+        self._previous_view_id = self._current_view_id
+        if hasattr(self, "_back_btn"):
+            self._back_btn.set_visible(True)
         self._title_label.set_label(plist.name)
+        
+        self._current_playlist_id = plist.id
+        self._all_songs = songs
+        self._sort_songs_list()
+        
         clear_container(self._songs_list)
-        for s in songs:
+        initial_batch = self._all_songs[:100]
+        for s in initial_batch:
             r = self._build_song_row(s, playlist_id=plist.id)
             self._songs_list.append(r)
+        if len(self._all_songs) > 100:
+            GLib.idle_add(self._load_remaining_songs, 100)
+            
         self._stack.set_visible_child_name("songs")
-        self._all_songs = songs
+        if hasattr(self, "_sort_btn"):
+            self._sort_btn.set_visible(True)
+            self._update_sort_popover_content()
 
     def _on_playlist_play(self, plist):
         songs = []

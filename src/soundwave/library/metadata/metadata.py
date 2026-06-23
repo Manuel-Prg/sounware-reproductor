@@ -138,28 +138,30 @@ def read_metadata(filepath: str) -> Optional[Song]:
         if not song.artist and guessed_artist:
             song.artist = guessed_artist
 
-    if not song.artist:
-        parent = path.parent
-        grandparent = parent.parent if parent else None
-        ignore_dirs = {"music", "musica", "downloads", "descargas", "documents", "documentos", "desktop", "escritorio", "temp", "tmp", "user", "home", "media", "mnt", "run"}
-        
-        parent_name = parent.name.strip() if parent else ""
-        gparent_name = grandparent.name.strip() if grandparent else ""
-        
-        # Estructura: .../Artista/Álbum/Canción.mp3
-        if gparent_name and gparent_name.lower() not in ignore_dirs and len(gparent_name) > 1:
+    # Intentar obtener artista y álbum de la estructura de carpetas si faltan
+    parent = path.parent
+    grandparent = parent.parent if parent else None
+    ignore_dirs = {"music", "musica", "downloads", "descargas", "documents", "documentos", "desktop", "escritorio", "temp", "tmp", "user", "home", "media", "mnt", "run"}
+    
+    parent_name = parent.name.strip() if parent else ""
+    gparent_name = grandparent.name.strip() if grandparent else ""
+    
+    # Estructura: .../Artista/Álbum/Canción.mp3
+    if gparent_name and gparent_name.lower() not in ignore_dirs and len(gparent_name) > 1:
+        if not song.artist:
             song.artist = gparent_name
-            if not song.album and parent_name and parent_name.lower() not in ignore_dirs:
-                song.album = parent_name
-        # Estructura: .../Artista/Canción.mp3 o .../Artista - Álbum/Canción.mp3
-        elif parent_name and parent_name.lower() not in ignore_dirs and len(parent_name) > 1:
-            if " - " in parent_name:
-                parts = parent_name.split(" - ", 1)
+        if not song.album and parent_name and parent_name.lower() not in ignore_dirs:
+            song.album = parent_name
+    # Estructura: .../Artista/Canción.mp3 o .../Artista - Álbum/Canción.mp3
+    elif parent_name and parent_name.lower() not in ignore_dirs and len(parent_name) > 1:
+        if " - " in parent_name:
+            parts = parent_name.split(" - ", 1)
+            if not song.artist:
                 song.artist = parts[0].strip()
-                if not song.album:
-                    song.album = parts[1].strip()
-            else:
-                song.artist = parent_name
+            if not song.album:
+                song.album = parts[1].strip()
+        elif not song.artist:
+            song.artist = parent_name
 
     return song
 

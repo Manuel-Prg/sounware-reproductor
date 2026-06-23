@@ -84,7 +84,14 @@ class Player:
 
         self._position_timer: Optional[int] = None
         self._crossfade_fade_out_timer: Optional[int] = None
+        self._crossfade_fade_in_timer: Optional[int] = None
         self._crossfade_volume_step: float = 0.0
+        self._crossfade_steps_remaining: int = 0
+        self._crossfade_target_volume: float = 1.0
+        self._next_song: Optional[Song] = None
+        # Flag para evitar doble avance: True cuando _on_about_to_finish
+        # ya actualizó el índice/URI, así _on_eos no llama a next() de nuevo.
+        self._gapless_advanced: bool = False
 
         # Construir el pipeline UNA sola vez al inicio
         self._build_pipeline()
@@ -200,6 +207,11 @@ class Player:
           NULL → set uri → PLAYING
         """
         self._stop_position_timer()
+        # Resetear el flag de avance gapless al iniciar una nueva canción manualmente
+        self._gapless_advanced = False
+        # Cancelar cualquier fade de crossfade en curso
+        self._cancel_crossfade_timers()
+        self._next_song = None
 
         # Llevar a NULL libera el decoder anterior limpiamente
         self._playbin.set_state(Gst.State.NULL)
@@ -513,22 +525,122 @@ class Player:
                 return
         song = self._queue[next_idx]
         self._current_index = next_idx
-        self._current_song = song
+        self._next_song = song
         self._playbin.set_property("uri", Path(song.filepath).resolve().as_uri())
-        self._apply_volume_with_gain()
-        GLib.idle_add(lambda: self._emit_song())
+        # Marcar que ya avanzamos aquí; _on_eos no debe llamar a next() de nuevo
+        self._gapless_advanced = True
 
         # Crossfade: bajar volumen gradualmente si está habilitado
-        # Nota: Implementación básica de crossfade usando volumen
-        # Para crossfade real se requiere un pipeline más complejo con dos playbins
         if self._crossfade_duration > 0:
-            self._crossfade_volume_step = 1.0 / (self._crossfade_duration * 10)  # 10 steps per second
-            self._crossfade_fade_out_timer = GLib.timeout_add(100, self._crossfade_fade_step, self._crossfade_duration * 10)
+            self._start_fade_out()
+
+    def _start_fade_out(self):
+        self._cancel_crossfade_timers()
+        total_steps = int(self._crossfade_duration * 10)  # 10 pasos por segundo
+        if total_steps <= 0:
+            return
+        
+        current_volume = self._playbin.get_property("volume") if self._playbin else self._volume
+        self._crossfade_volume_step = current_volume / total_steps
+        self._crossfade_steps_remaining = total_steps
+        self._crossfade_fade_out_timer = GLib.timeout_add(100, self._fade_out_step)
+
+    def _fade_out_step(self) -> bool:
+        if not self._playbin:
+            self._crossfade_fade_out_timer = None
+            return False
+            
+        self._crossfade_steps_remaining -= 1
+        if self._crossfade_steps_remaining <= 0:
+            self._playbin.set_property("volume", 0.0)
+            self._crossfade_fade_out_timer = None
+            return False
+            
+        current_volume = self._playbin.get_property("volume")
+        new_volume = max(0.0, current_volume - self._crossfade_volume_step)
+        self._playbin.set_property("volume", new_volume)
+        return True
+
+    def _on_stream_start(self):
+        if self._next_song:
+            self._current_song = self._next_song
+            self._next_song = None
+            GLib.idle_add(lambda: self._emit_song())
+            
+            # Determinar el volumen objetivo con ganancia
+            factor = 1.0
+            if self._current_song:
+                mode = self._replaygain_mode
+                if mode == "track":
+                    gain = getattr(self._current_song, "replaygain_track_gain", 0.0)
+                    if gain != 0.0:
+                        factor = 10 ** (gain / 20.0)
+                elif mode == "album":
+                    gain = getattr(self._current_song, "replaygain_album_gain", 0.0)
+                    if gain == 0.0:
+                        gain = getattr(self._current_song, "replaygain_track_gain", 0.0)
+                    if gain != 0.0:
+                        factor = 10 ** (gain / 20.0)
+            
+            target_volume = self._volume * factor
+            
+            if self._crossfade_duration > 0:
+                self._start_fade_in(target_volume)
+            else:
+                if self._playbin:
+                    self._playbin.set_property("volume", target_volume)
+
+    def _start_fade_in(self, target_volume: float):
+        # Asegurarse de limpiar cualquier timer previo
+        if self._crossfade_fade_out_timer is not None:
+            GLib.source_remove(self._crossfade_fade_out_timer)
+            self._crossfade_fade_out_timer = None
+        if self._crossfade_fade_in_timer is not None:
+            GLib.source_remove(self._crossfade_fade_in_timer)
+            self._crossfade_fade_in_timer = None
+
+        total_steps = int(self._crossfade_duration * 10)
+        if total_steps <= 0:
+            if self._playbin:
+                self._playbin.set_property("volume", target_volume)
+            return
+
+        current_volume = self._playbin.get_property("volume") if self._playbin else 0.0
+        self._crossfade_volume_step = (target_volume - current_volume) / total_steps
+        self._crossfade_steps_remaining = total_steps
+        self._crossfade_target_volume = target_volume
+        self._crossfade_fade_in_timer = GLib.timeout_add(100, self._fade_in_step)
+
+    def _fade_in_step(self) -> bool:
+        if not self._playbin:
+            self._crossfade_fade_in_timer = None
+            return False
+            
+        self._crossfade_steps_remaining -= 1
+        if self._crossfade_steps_remaining <= 0:
+            self._playbin.set_property("volume", self._crossfade_target_volume)
+            self._crossfade_fade_in_timer = None
+            return False
+            
+        current_volume = self._playbin.get_property("volume")
+        new_volume = min(self._crossfade_target_volume, max(0.0, current_volume + self._crossfade_volume_step))
+        self._playbin.set_property("volume", new_volume)
+        return True
+
+    def _cancel_crossfade_timers(self):
+        if self._crossfade_fade_out_timer is not None:
+            GLib.source_remove(self._crossfade_fade_out_timer)
+            self._crossfade_fade_out_timer = None
+        if self._crossfade_fade_in_timer is not None:
+            GLib.source_remove(self._crossfade_fade_in_timer)
+            self._crossfade_fade_in_timer = None
 
     def _on_bus_message(self, bus, message):
         t = message.type
         if t == Gst.MessageType.EOS:
             self._on_eos()
+        elif t == Gst.MessageType.STREAM_START:
+            self._on_stream_start()
         elif t == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             print(f"[GStreamer] Error: {err} — {debug}")
@@ -576,12 +688,19 @@ class Player:
 
     def _on_eos(self):
         self._emit_eos()
-        self.next()
+        if self._gapless_advanced:
+            # _on_about_to_finish ya cargó la siguiente canción; solo reseteamos el flag
+            self._gapless_advanced = False
+        else:
+            # Avance normal: about-to-finish no se disparó (p.ej. stream muy corto)
+            self.next()
 
     def _set_state(self, state: PlayerState):
         if self._state == state:
             return  # FIX: evita doble emisión de callbacks
         self._state = state
+        if state in (PlayerState.STOPPED, PlayerState.PAUSED):
+            self._cancel_crossfade_timers()
         for cb in self._state_callbacks:
             cb(state)
 
@@ -617,23 +736,9 @@ class Player:
                 self._emit_position(pos)
         return True  # mantener el timer vivo
 
-    def _crossfade_fade_step(self, steps_remaining: int) -> bool:
-        """Baja el volumen gradualmente durante el crossfade"""
-        if steps_remaining <= 0 or not self._playbin:
-            # Restaurar volumen normal al terminar
-            self._apply_volume_with_gain()
-            self._crossfade_fade_out_timer = None
-            return False
-        
-        # Calcular nuevo volumen (fade out)
-        current_volume = self._playbin.get_property("volume")
-        new_volume = max(0.0, current_volume - self._crossfade_volume_step)
-        self._playbin.set_property("volume", new_volume)
-        
-        return True  # continuar el timer
-
     def destroy(self):
         self._stop_position_timer()
+        self._cancel_crossfade_timers()
         if self._playbin:
             self._playbin.set_state(Gst.State.NULL)
         self.disconnect_all()

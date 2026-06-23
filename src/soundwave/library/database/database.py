@@ -219,7 +219,11 @@ class Database:
                 CASE WHEN album_artist = '' OR album_artist IS NULL THEN 'Artista desconocido' ELSE album_artist END as album_artist,
                 COUNT(*) as song_count,
                 SUM(duration) as total_duration,
-                MAX(has_embedded_art) as has_art
+                MAX(has_embedded_art) as has_art,
+                MAX(year) as year,
+                MAX(added_at) as added_at,
+                MAX(artist) as artist,
+                MAX(composer) as composer
             FROM songs
             GROUP BY 
                 CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END,

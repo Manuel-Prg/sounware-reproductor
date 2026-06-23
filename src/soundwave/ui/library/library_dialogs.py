@@ -47,3 +47,49 @@ class CreatePlaylistDialog(Gtk.Window):
             self.destroy()
 
 
+class ExportPlaylistDialog(Gtk.Window):
+    def __init__(self, parent_window, playlists, callback):
+        super().__init__(transient_for=parent_window, modal=True)
+        self.set_title("Exportar Lista de Reproducción")
+        self.set_default_size(320, 160)
+        self.playlists = playlists
+        self.callback = callback
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+
+        label = Gtk.Label(label="Selecciona la lista de reproducción:")
+        label.set_halign(Gtk.Align.START)
+        box.append(label)
+
+        names = [pl.name for pl in playlists]
+        model = Gtk.StringList.new(names)
+        self.dropdown = Gtk.DropDown(model=model)
+        box.append(self.dropdown)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        btn_box.set_halign(Gtk.Align.END)
+
+        cancel_btn = Gtk.Button(label="Cancelar")
+        cancel_btn.connect("clicked", lambda b: self.destroy())
+        btn_box.append(cancel_btn)
+
+        export_btn = Gtk.Button(label="Exportar...")
+        export_btn.add_css_class("suggested-action")
+        export_btn.connect("clicked", self._on_export)
+        btn_box.append(export_btn)
+
+        box.append(btn_box)
+        self.set_child(box)
+
+    def _on_export(self):
+        selected_idx = self.dropdown.get_selected()
+        if 0 <= selected_idx < len(self.playlists):
+            playlist = self.playlists[selected_idx]
+            self.callback(playlist)
+        self.destroy()
+
+

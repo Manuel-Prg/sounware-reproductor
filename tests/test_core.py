@@ -132,5 +132,30 @@ class TestSoundwaveCore(unittest.TestCase):
         from soundwave.ui.window.onboarding import OnboardingWindow
         self.assertTrue(issubclass(OnboardingWindow, Adw.Window))
 
+    def test_remove_missing_files(self):
+        from soundwave.library.database import Database
+        from soundwave.library.scanner.scanner import MusicScanner
+        import tempfile
+        import shutil
+
+        temp_dir = tempfile.mkdtemp()
+        db_path = Path(temp_dir) / "test.db"
+        try:
+            db = Database(db_path)
+            # Insert a song pointing to a non-existent file
+            db.conn.execute("""
+                INSERT INTO songs (filepath, title, artist, album, genre)
+                VALUES ('non_existent_file_path_123.mp3', 'Song 1', 'Artist A', 'Album X', 'Jazz')
+            """)
+            db.conn.commit()
+            
+            scanner = MusicScanner(db)
+            removed = scanner.remove_missing_files()
+            
+            self.assertEqual(removed, 1)
+            self.assertEqual(len(db.get_all_songs()), 0)
+        finally:
+            shutil.rmtree(temp_dir)
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Pango, GLib, Gdk
 import math
+import threading
 from typing import Optional, Callable
 from pathlib import Path
 
@@ -148,6 +149,10 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         self._artist_label.add_controller(gesture)
         labels_box.append(self._artist_label)
 
+        self._audio_info_label = Gtk.Label(label="")
+        self._audio_info_label.add_css_class("visualizer-audio-info")
+        labels_box.append(self._audio_info_label)
+
         overlay_box.append(labels_box)
 
         self._discography_revealer = Gtk.Revealer()
@@ -258,6 +263,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         if not song:
             self._title_label.set_text("Sin reproducción")
             self._artist_label.set_text("")
+            self._audio_info_label.set_text("")
             self._art_picture.set_paintable(None)
             self._bg_color = (0.05, 0.05, 0.05)
             self._accent_color = (0.11, 0.73, 0.33)
@@ -272,6 +278,9 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         self._title_label.set_text(song.display_title)
         self._artist_label.set_text(song.display_artist)
         self._current_artist = song.display_artist
+        
+        self._audio_info_label.set_text("Cargando...")
+        self._trigger_audio_info_extraction(song)
 
         art_path = get_art_path(song.id, self.db) if song.id is not None else None
         if art_path and art_path.exists():
@@ -293,6 +302,55 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
 
         if self._show_discography:
             self._populate_discography()
+
+    def _trigger_audio_info_extraction(self, song: Song):
+        def run_extraction():
+            from mutagen import File as MutagenFile
+            try:
+                mfile = MutagenFile(song.filepath)
+                if mfile is None:
+                    GLib.idle_add(self._audio_info_label.set_text, "")
+                    return
+                
+                ext = Path(song.filepath).suffix.lower().replace(".", "")
+                codec = ext.upper()
+                
+                bitrate_val = getattr(mfile.info, "bitrate", 0) or 0
+                if bitrate_val <= 0 and song.duration > 0 and song.file_size > 0:
+                    bitrate_val = int((song.file_size * 8) / song.duration)
+                
+                bitrate_str = ""
+                if bitrate_val > 0:
+                    kbps = int(bitrate_val / 1000)
+                    bitrate_str = f"{kbps} kbps"
+                
+                sr_str = ""
+                if hasattr(mfile.info, "sample_rate") and mfile.info.sample_rate:
+                    khz = mfile.info.sample_rate / 1000.0
+                    if khz.is_integer():
+                        sr_str = f"{int(khz)} kHz"
+                    else:
+                        sr_str = f"{khz:.1f} kHz"
+                        
+                bits_str = ""
+                if hasattr(mfile.info, "bits_per_sample") and mfile.info.bits_per_sample:
+                    bits_str = f"{mfile.info.bits_per_sample} bit"
+                    
+                parts = [codec]
+                if bits_str:
+                    parts.append(bits_str)
+                if sr_str:
+                    parts.append(sr_str)
+                if bitrate_str:
+                    parts.append(bitrate_str)
+                    
+                info_text = "  ·  ".join(parts)
+                GLib.idle_add(self._audio_info_label.set_text, info_text)
+            except Exception as e:
+                print(f"Error reading audio format in visualizer: {e}")
+                GLib.idle_add(self._audio_info_label.set_text, "")
+
+        threading.Thread(target=run_extraction, daemon=True).start()
 
     def _on_bg_clicked(self, gesture, n_press, x, y):
         if CAIRO_SUPPORTED:

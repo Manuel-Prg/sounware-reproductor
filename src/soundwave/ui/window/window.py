@@ -63,7 +63,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
         self._main_box.append(self._split_view)
 
         # Player bar at bottom
-        self._player_bar = PlayerBar(player, db)
+        self._player_bar = PlayerBar(player, db, self._lastfm)
         self._player_bar.connect_toggle_mini(self._on_toggle_mini)
         self._player_bar.connect_show_equalizer(self._on_show_equalizer)
         self._player_bar.connect_toggle_fullscreen(self._toggle_fullscreen)
@@ -100,6 +100,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
         # Configurar y arrancar FolderWatcher para directorios de música
         self._start_folder_watcher()
+        self._run_silent_background_scan()
         self.connect("destroy", self._on_destroy)
 
         # Prompt user on first run about auto album art download
@@ -338,6 +339,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
     def set_lastfm(self, lastfm):
         self._lastfm = lastfm
+        self._player_bar.set_lastfm(lastfm)
 
     def get_player_bar(self):
         return self._player_bar
@@ -367,6 +369,31 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
         watch_paths = [Path(d) for d in dirs if Path(d).exists()]
         if watch_paths:
             self._watcher.start_watching(watch_paths)
+
+    def _run_silent_background_scan(self):
+        from soundwave.library.config.config import load_settings
+        settings = load_settings()
+        dirs = settings.get("music_directories", [])
+        if not dirs:
+            return
+        
+        directories = [Path(d) for d in dirs if Path(d).exists()]
+        if not directories:
+            return
+
+        def scan_task():
+            try:
+                # Silent scan in the background
+                added, skipped = self.scanner.scan_directories(directories)
+                removed = self.scanner.remove_missing_files()
+                if added > 0 or removed > 0:
+                    GLib.idle_add(self._refresh_library)
+            except Exception as e:
+                print(f"[Silent Startup Scan] Error: {e}")
+
+        import threading
+        thread = threading.Thread(target=scan_task, daemon=True)
+        thread.start()
 
     def _on_destroy(self, *args):
         if self._watcher:

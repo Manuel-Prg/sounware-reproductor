@@ -180,3 +180,65 @@ class WindowLibraryScanMixin:
         toast.set_timeout(3)
         self._player_bar.add_toast(toast)
 
+    def _start_rescan(self):
+        from soundwave.library.config.config import load_settings
+        settings = load_settings()
+        dirs = settings.get("music_directories", [])
+        if not dirs:
+            toast = Adw.Toast.new("No hay carpetas configuradas en la biblioteca.")
+            toast.set_timeout(3)
+            self._player_bar.add_toast(toast)
+            return
+
+        directories = [Path(d) for d in dirs if Path(d).exists()]
+        if not directories:
+            toast = Adw.Toast.new("Ninguna de las carpetas configuradas existe en el disco.")
+            toast.set_timeout(3)
+            self._player_bar.add_toast(toast)
+            return
+
+        self._scan_dialog = Adw.AlertDialog(
+            heading="Re-escaneando biblioteca...",
+            body="Buscando cambios en tus carpetas de música...",
+        )
+        self._scan_dialog.add_response("cancel", "Cancelar")
+        self._scan_dialog.connect("response", lambda d, r: self.scanner.cancel())
+        self._scan_dialog.present(self)
+
+        def scan_task():
+            try:
+                added, skipped = self.scanner.scan_directories(
+                    directories,
+                    progress_cb=lambda done, total, msg: GLib.idle_add(
+                        lambda d=done, t=total, m=msg: self._update_scan_progress(d, t, m)
+                    )
+                )
+                removed = self.scanner.remove_missing_files()
+                GLib.idle_add(lambda: self._on_rescan_complete(added, removed))
+            except Exception as e:
+                print(f"[Rescan] Error: {e}")
+                GLib.idle_add(lambda: self._on_scan_error(str(e)))
+
+        import threading
+        thread = threading.Thread(target=scan_task, daemon=True)
+        thread.start()
+
+    def _on_rescan_complete(self, added: int, removed: int):
+        if self._scan_dialog:
+            try:
+                self._scan_dialog.close()
+                self._scan_dialog = None
+            except Exception:
+                pass
+        
+        msg = f"Re-escaneo completo: {added} añadidas/actualizadas"
+        if removed > 0:
+            msg += f", {removed} eliminadas"
+        toast = Adw.Toast.new(msg)
+        toast.set_timeout(4)
+        self._player_bar.add_toast(toast)
+        
+        self._refresh_library()
+        self._show_stats_notification(added)
+        self._start_folder_watcher()
+

@@ -272,7 +272,8 @@ class MiniPlayer(Gtk.Window):
             min-width: 10px;
             border-radius: 50%;
             background-color: @accent_bg_color;
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+            box-shadow: none;
+            border: none;
             transition: background-color 0.6s ease;
         }
         """
@@ -341,6 +342,8 @@ class MiniPlayer(Gtk.Window):
         }}
         .mini-player-scale slider {{
             background-color: {accent_hex};
+            box-shadow: none;
+            border: none;
         }}
         .mini-player-repeat-active {{
             color: {accent_hex};
@@ -397,6 +400,8 @@ class MiniPlayer(Gtk.Window):
         }
         .mini-player-scale slider {
             background-color: @accent_bg_color;
+            box-shadow: none;
+            border: none;
         }
         .mini-player-repeat-active {
             color: @accent_bg_color;

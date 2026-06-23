@@ -136,8 +136,11 @@ class LibraryCardsMixin:
         title.add_css_class("album-card-title")
         box.append(title)
 
-        # Subtitle (Artist)
-        artist_name = album.get("album_artist", "") or UNKNOWN_ARTIST
+        # Subtitle (Artist) - Use artist from songs if album_artist is unknown
+        artist_name = album.get("album_artist", "")
+        if artist_name == UNKNOWN_ARTIST and songs:
+            # Try to get artist from the first song
+            artist_name = songs[0].display_artist
         artist = Gtk.Label(label=artist_name)
         artist.set_ellipsize(Pango.EllipsizeMode.END)
         artist.set_max_width_chars(18)

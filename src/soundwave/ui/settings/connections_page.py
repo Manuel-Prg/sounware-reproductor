@@ -275,8 +275,13 @@ class ConnectionsPage(Adw.PreferencesPage):
             self.play_count_row.set_subtitle(f"{play_count} reproducciones")
 
         # Clear previous recent tracks
-        for child in self.recent_group:
-            self.recent_group.remove(child)
+        if hasattr(self, "_recent_rows"):
+            for row in self._recent_rows:
+                try:
+                    self.recent_group.remove(row)
+                except Exception:
+                    pass
+        self._recent_rows = []
 
         # Add recent tracks
         if recent_tracks:
@@ -288,11 +293,13 @@ class ConnectionsPage(Adw.PreferencesPage):
                 row.set_subtitle(artist_name)
                 row.set_sensitive(False)
                 self.recent_group.add(row)
+                self._recent_rows.append(row)
         else:
             row = Adw.ActionRow()
             row.set_title("No hay canciones recientes")
             row.set_sensitive(False)
             self.recent_group.add(row)
+            self._recent_rows.append(row)
 
     def _on_refresh_stats(self, btn):
         """Refresh Last.fm statistics"""

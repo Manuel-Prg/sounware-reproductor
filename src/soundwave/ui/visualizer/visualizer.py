@@ -191,10 +191,20 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
 
         if not CAIRO_SUPPORTED:
             bg_r, bg_g, bg_b = self._bg_color
-            r1, g1, b1 = int(bg_r * 0.15 * 255), int(bg_g * 0.15 * 255), int(bg_b * 0.15 * 255)
+            ac_r, ac_g, ac_b = self._accent_color
+            fg_r, fg_g, fg_b = self._fg_color
+            
+            r1, g1, b1 = int(bg_r * 255), int(bg_g * 255), int(bg_b * 255)
+            r2, g2, b2 = int(ac_r * 255), int(ac_g * 255), int(ac_b * 255)
+            r3, g3, b3 = int(fg_r * 255), int(fg_g * 255), int(fg_b * 255)
+            
             css_parts.append(f"""
             .visualizer-fallback-bg {{
-                background: linear-gradient(to bottom, rgb({r1}, {g1}, {b1}), #080808);
+                background-color: #040405;
+                background-image: 
+                    radial-gradient(circle at 20% 20%, rgba({r1}, {g1}, {b1}, 0.15) 0%, transparent 80%),
+                    radial-gradient(circle at 80% 40%, rgba({r2}, {g2}, {b2}, 0.12) 0%, transparent 80%),
+                    radial-gradient(circle at 30% 80%, rgba({r3}, {g3}, {b3}, 0.10) 0%, transparent 80%);
             }}
             """)
             
@@ -299,6 +309,8 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             self._fg_color = (0.8, 0.8, 0.8)
 
         self._update_theme_colors()
+        if self._drawing_area:
+            self._drawing_area.queue_draw()
 
         if self._show_discography:
             self._populate_discography()
@@ -361,13 +373,41 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             self._update_fallback_bars()
 
     def _draw_callback(self, area, cr, width, height, user_data):
-        # pyrefly: ignore [missing-attribute]
-        bg_pat = cairo.LinearGradient(0, 0, 0, height)
-        r, g, b = self._bg_color
-        bg_pat.add_color_stop_rgb(0, r * 0.15, g * 0.15, b * 0.15)
-        bg_pat.add_color_stop_rgb(1.0, 0.03, 0.03, 0.03)
+        # 1. Base dark background (very dark neutral tone, e.g. #040405)
         cr.rectangle(0, 0, width, height)
-        cr.set_source(bg_pat)
+        cr.set_source_rgb(0.04, 0.04, 0.05)
+        cr.fill()
+
+        # Extract colors
+        bg_r, bg_g, bg_b = self._bg_color
+        ac_r, ac_g, ac_b = self._accent_color
+        fg_r, fg_g, fg_b = self._fg_color
+
+        # Gradient 1: Primary BG color in top-left
+        # pyrefly: ignore [missing-attribute]
+        g1 = cairo.RadialGradient(width * 0.2, height * 0.2, 0.0, width * 0.2, height * 0.2, max(width, height) * 1.4)
+        g1.add_color_stop_rgba(0.0, bg_r, bg_g, bg_b, 0.15)
+        g1.add_color_stop_rgba(1.0, bg_r, bg_g, bg_b, 0.0)
+        cr.rectangle(0, 0, width, height)
+        cr.set_source(g1)
+        cr.fill()
+
+        # Gradient 2: Accent color in center-right
+        # pyrefly: ignore [missing-attribute]
+        g2 = cairo.RadialGradient(width * 0.8, height * 0.4, 0.0, width * 0.8, height * 0.4, max(width, height) * 1.4)
+        g2.add_color_stop_rgba(0.0, ac_r, ac_g, ac_b, 0.12)
+        g2.add_color_stop_rgba(1.0, ac_r, ac_g, ac_b, 0.0)
+        cr.rectangle(0, 0, width, height)
+        cr.set_source(g2)
+        cr.fill()
+
+        # Gradient 3: Foreground/Secondary color in bottom-left
+        # pyrefly: ignore [missing-attribute]
+        g3 = cairo.RadialGradient(width * 0.3, height * 0.8, 0.0, width * 0.3, height * 0.8, max(width, height) * 1.4)
+        g3.add_color_stop_rgba(0.0, fg_r, fg_g, fg_b, 0.10)
+        g3.add_color_stop_rgba(1.0, fg_r, fg_g, fg_b, 0.0)
+        cr.rectangle(0, 0, width, height)
+        cr.set_source(g3)
         cr.fill()
 
         if self._show_discography:

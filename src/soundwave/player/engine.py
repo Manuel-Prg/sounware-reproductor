@@ -52,7 +52,13 @@ EosCallback         = Callable[[], None]
 class Player:
     def __init__(self):
         Gst.init(None)
-        self._playbin:   Optional[Gst.Element] = None
+        self._playbin1: Optional[Gst.Element] = None
+        self._playbin2: Optional[Gst.Element] = None
+        self._playbin:  Optional[Gst.Element] = None
+        self._eq1: Optional[Gst.Element] = None
+        self._eq2: Optional[Gst.Element] = None
+        self._spec1: Optional[Gst.Element] = None
+        self._spec2: Optional[Gst.Element] = None
         self._state      = PlayerState.STOPPED
         self._current_song: Optional[Song] = None
         self._queue:     list[Song] = []
@@ -62,8 +68,9 @@ class Player:
         self._repeat_mode            = RepeatMode.NONE
         self._shuffle:   bool       = False
         self._equalizer: Optional[Gst.Element] = None
+        self._spectrum:  Optional[Gst.Element] = None
         
-        # Cargar configuración del ecualizador y ReplayGain
+        # Cargar configuración del ecualizador, ReplayGain y reproducción sin pausa
         from soundwave.library.config.config import load_settings
         from soundwave.player.equalizer import BAND_MODES
         settings = load_settings()
@@ -75,6 +82,7 @@ class Player:
         self._equalizer_enabled: bool = settings.get("equalizer_enabled", True)
         self._replaygain_mode: str = settings.get("replaygain_mode", "track")
         self._crossfade_duration: float = settings.get("crossfade_duration", 0)
+        self._gapless_enabled: bool = settings.get("gapless_enabled", True)
 
         self._state_callbacks:    list[StateChangeCallback] = []
         self._song_callbacks:     list[SongChangeCallback]  = []
@@ -83,11 +91,13 @@ class Player:
         self._spectrum_callbacks: list[Callable[[list[float]], None]] = []
 
         self._position_timer: Optional[int] = None
+        self._crossfade_timer_id: Optional[int] = None
         self._crossfade_fade_out_timer: Optional[int] = None
         self._crossfade_fade_in_timer: Optional[int] = None
         self._crossfade_volume_step: float = 0.0
         self._crossfade_steps_remaining: int = 0
         self._crossfade_target_volume: float = 1.0
+        self._crossfade_triggered: bool = False
         self._next_song: Optional[Song] = None
         # Flag para evitar doble avance: True cuando _on_about_to_finish
         # ya actualizó el índice/URI, así _on_eos no llama a next() de nuevo.
@@ -98,106 +108,80 @@ class Player:
 
     # --- Pipeline (construir una sola vez) ---
 
-    def _build_pipeline(self):
-        """
-        FIX: antes se destruía y recreaba el pipeline en cada play_file().
-        Ahora se construye una vez. Para cambiar de canción basta con:
-          1. set_state(NULL)  → libera el recurso actual
-          2. set_property("uri", nuevo_uri)
-          3. set_state(PLAYING)
-        Esto elimina el glitch de audio entre canciones y es más eficiente.
-        """
-        self._playbin = Gst.ElementFactory.make("playbin3", "playbin")
-        if self._playbin is None:
-            # playbin3 no disponible (GStreamer < 1.18), usar playbin
-            self._playbin = Gst.ElementFactory.make("playbin", "playbin")
-
-        if self._playbin is None:
-            raise RuntimeError("No se pudo crear playbin/playbin3. Verifica gstreamer1.0-plugins-base.")
-
-        self._playbin.set_property("volume", self._volume)
-        self._playbin.set_property("buffer-size", 4096)
-
-        bus = self._playbin.get_bus()
+    def _create_playbin(self, name: str) -> Gst.Element:
+        playbin = Gst.ElementFactory.make("playbin3", name)
+        if playbin is None:
+            playbin = Gst.ElementFactory.make("playbin", name)
+        if playbin is None:
+            raise RuntimeError(f"No se pudo crear {name}. Verifica gstreamer1.0-plugins-base.")
+        
+        playbin.set_property("volume", self._volume)
+        playbin.set_property("buffer-size", 4096)
+        
+        bus = playbin.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self._on_bus_message)
-
-        self._playbin.connect("about-to-finish", self._on_about_to_finish)
-
-        # Adjuntar e inicializar el ecualizador en el pipeline
-        self._attach_equalizer()
-
-    def _attach_equalizer(self):
-        """Inserta el ecualizador y el espectro en el pipeline (llamar antes del primer play)."""
-        if self._equalizer or not self._playbin:
-            return
         
-        # Usar equalizer-10bands para compatibilidad (equalizer-nbands tiene API diferente)
-        eq = Gst.ElementFactory.make("equalizer-10bands", "equalizer")
-        spec = Gst.ElementFactory.make("spectrum", "spectrum")
+        playbin.connect("about-to-finish", self._on_about_to_finish)
+        return playbin
 
+    def _build_pipeline(self):
+        self._playbin1 = self._create_playbin("playbin1")
+        self._playbin2 = self._create_playbin("playbin2")
+        self._playbin = self._playbin1
+        
+        self._eq1, self._spec1 = self._attach_equalizer_to_playbin(self._playbin1, "equalizer1", "spectrum1")
+        self._eq2, self._spec2 = self._attach_equalizer_to_playbin(self._playbin2, "equalizer2", "spectrum2")
+        
+        self._equalizer = self._eq1
+        self._spectrum = self._spec1
+        
+        self._apply_equalizer_gains()
+
+    def _attach_equalizer_to_playbin(self, playbin, eq_name, spec_name):
+        eq = Gst.ElementFactory.make("equalizer-10bands", eq_name)
+        spec = Gst.ElementFactory.make("spectrum", spec_name)
         if eq and spec:
-            self._equalizer = eq
-            self._spectrum = spec
-
-            # Configure spectrum element
             spec.set_property("bands", 64)
-            spec.set_property("threshold", -75)  # Umbral de ruido más bajo para captar frecuencias altas/tenues
+            spec.set_property("threshold", -75)
             spec.set_property("post-messages", True)
             spec.set_property("message-magnitude", True)
 
-            # Create filter bin to hold equalizer and spectrum
-            filt_bin = Gst.Bin.new("audio-filter-bin")
+            filt_bin = Gst.Bin.new(f"audio-filter-bin-{eq_name}")
             filt_bin.add(eq)
             filt_bin.add(spec)
             eq.link(spec)
 
-            # Add ghost pads
             sink_pad = Gst.GhostPad.new("sink", eq.get_static_pad("sink"))
             filt_bin.add_pad(sink_pad)
 
             src_pad = Gst.GhostPad.new("src", spec.get_static_pad("src"))
             filt_bin.add_pad(src_pad)
 
-            self._playbin.set_property("audio-filter", filt_bin)
-
-            # Aplicar bandas iniciales usando interpolación a 10 bandas
-            from soundwave.player.equalizer import gains_for_engine
-            n_bands = self._equalizer_n_bands
-            if len(self._equalizer_bands) != n_bands:
-                self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
-                self._equalizer_bands = self._equalizer_bands[:n_bands]
-            
-            # Convertir a 10 bandas para equalizer-10bands
-            engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
-            bands_to_apply = engine_bands if self._equalizer_enabled else [0.0] * 10
-            
-            for i, val in enumerate(bands_to_apply):
-                try:
-                    self._equalizer.set_property(f"band{i}", val)
-                    print(f"[Equalizer] Banda inicial {i}: {val} dB")
-                except Exception as e:
-                    print(f"Error al aplicar banda {i}: {e}")
+            playbin.set_property("audio-filter", filt_bin)
+            return eq, spec
         elif eq:
-            self._equalizer = eq
-            self._playbin.set_property("audio-filter", self._equalizer)
-            
-            # Aplicar bandas iniciales usando interpolación a 10 bandas
-            from soundwave.player.equalizer import gains_for_engine
-            n_bands = self._equalizer_n_bands
-            if len(self._equalizer_bands) != n_bands:
-                self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
-                self._equalizer_bands = self._equalizer_bands[:n_bands]
-            
-            # Convertir a 10 bandas para equalizer-10bands
-            engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
-            bands_to_apply = engine_bands if self._equalizer_enabled else [0.0] * 10
-            
-            for i, val in enumerate(bands_to_apply):
-                try:
-                    self._equalizer.set_property(f"band{i}", val)
-                except Exception as e:
-                    print(f"Error al aplicar banda {i}: {e}")
+            playbin.set_property("audio-filter", eq)
+            return eq, None
+        return None, None
+
+    def _apply_equalizer_gains(self):
+        from soundwave.player.equalizer import gains_for_engine
+        n_bands = self._equalizer_n_bands
+        if len(self._equalizer_bands) != n_bands:
+            self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
+            self._equalizer_bands = self._equalizer_bands[:n_bands]
+        
+        engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
+        bands_to_apply = engine_bands if self._equalizer_enabled else [0.0] * 10
+        
+        for eq in (self._eq1, self._eq2):
+            if eq:
+                for i, val in enumerate(bands_to_apply):
+                    try:
+                        eq.set_property(f"band{i}", val)
+                    except Exception as e:
+                        print(f"Error al aplicar banda {i}: {e}")
 
     # --- Public API ---
 
@@ -209,8 +193,8 @@ class Player:
         self._stop_position_timer()
         # Resetear el flag de avance gapless al iniciar una nueva canción manualmente
         self._gapless_advanced = False
-        # Cancelar cualquier fade de crossfade en curso
-        self._cancel_crossfade_timers()
+        # Cancelar cualquier fade de crossfade en curso y restablecer estado
+        self._reset_crossfade_state()
         self._next_song = None
 
         # Llevar a NULL libera el decoder anterior limpiamente
@@ -233,14 +217,20 @@ class Player:
             self.play_index(self._current_index if self._current_index >= 0 else 0)
             return
         if self._state == PlayerState.PLAYING:
-            self._playbin.set_state(Gst.State.PAUSED)
+            self._finish_crossfade_immediately()
+            self._playbin1.set_state(Gst.State.PAUSED)
+            self._playbin2.set_state(Gst.State.PAUSED)
         elif self._state == PlayerState.PAUSED:
-            self._playbin.set_state(Gst.State.PLAYING)
+            self._playbin1.set_state(Gst.State.PLAYING)
+            self._playbin2.set_state(Gst.State.PLAYING)
 
     def stop(self):
         self._stop_position_timer()
-        if self._playbin:
-            self._playbin.set_state(Gst.State.NULL)
+        self._reset_crossfade_state()
+        if self._playbin1:
+            self._playbin1.set_state(Gst.State.NULL)
+        if self._playbin2:
+            self._playbin2.set_state(Gst.State.NULL)
         self._set_state(PlayerState.STOPPED)
         self._emit_position(PlaybackPosition(0, 0))
 
@@ -284,7 +274,10 @@ class Player:
 
     def set_volume(self, volume: float):
         self._volume = max(0.0, min(1.0, volume))
-        self._apply_volume_with_gain()
+        if self._crossfade_timer_id is not None:
+            self._finish_crossfade_immediately()
+        else:
+            self._apply_volume_with_gain()
 
     def get_volume(self) -> float:
         return self._volume
@@ -415,7 +408,7 @@ class Player:
         bands: list of gain values (may be 3, 5, 10, 15 or 31 items).
         n_bands: the UI band mode that produced `bands`.
         """
-        from soundwave.player.equalizer import gains_for_engine, BAND_MODES
+        from soundwave.player.equalizer import BAND_MODES
         if n_bands not in BAND_MODES:
             n_bands = 10
         
@@ -427,19 +420,7 @@ class Player:
         save_setting("equalizer_bands", self._equalizer_bands)
         save_setting("equalizer_n_bands", self._equalizer_n_bands)
 
-        # Convertir a 10 bandas para equalizer-10bands
-        engine_bands = gains_for_engine(bands, n_bands)
-
-        if self._equalizer and self._equalizer_enabled:
-            print(f"[Equalizer] Aplicando {len(engine_bands)} bandas (interpoladas de {n_bands}): {engine_bands}")
-            for i, val in enumerate(engine_bands):
-                try:
-                    self._equalizer.set_property(f"band{i}", val)
-                    print(f"[Equalizer] Banda {i}: {val} dB")
-                except Exception as e:
-                    print(f"Error al aplicar banda {i}: {e}")
-        else:
-            print(f"[Equalizer] No se aplican bandas - equalizer: {self._equalizer is not None}, enabled: {self._equalizer_enabled}")
+        self._apply_equalizer_gains()
 
     def get_equalizer_bands(self) -> list[float]:
         return list(self._equalizer_bands)
@@ -449,24 +430,7 @@ class Player:
         from soundwave.library.config.config import save_setting
         save_setting("equalizer_enabled", enabled)
 
-        if self._equalizer:
-            # Convertir a 10 bandas para equalizer-10bands
-            from soundwave.player.equalizer import gains_for_engine
-            n_bands = self._equalizer_n_bands
-            if len(self._equalizer_bands) != n_bands:
-                self._equalizer_bands = list(self._equalizer_bands) + [0.0] * (n_bands - len(self._equalizer_bands))
-                self._equalizer_bands = self._equalizer_bands[:n_bands]
-            
-            engine_bands = gains_for_engine(self._equalizer_bands, n_bands)
-            bands_to_apply = engine_bands if enabled else [0.0] * 10
-            
-            print(f"[Equalizer] Habilitado/Deshabilitado: {enabled}, aplicando {len(bands_to_apply)} bandas")
-            for i, val in enumerate(bands_to_apply):
-                try:
-                    self._equalizer.set_property(f"band{i}", val)
-                    print(f"[Equalizer] Banda {i}: {val} dB")
-                except Exception as e:
-                    print(f"Error al aplicar banda {i}: {e}")
+        self._apply_equalizer_gains()
 
     def get_equalizer_enabled(self) -> bool:
         return self._equalizer_enabled
@@ -513,191 +477,236 @@ class Player:
 
     # --- Internal ---
 
+    def _get_target_volume_for_song(self, song: Optional[Song]) -> float:
+        factor = 1.0
+        if song:
+            mode = self._replaygain_mode
+            if mode == "track":
+                gain = getattr(song, "replaygain_track_gain", 0.0)
+                if gain != 0.0:
+                    factor = 10 ** (gain / 20.0)
+            elif mode == "album":
+                gain = getattr(song, "replaygain_album_gain", 0.0)
+                if gain == 0.0:
+                    gain = getattr(song, "replaygain_track_gain", 0.0)
+                if gain != 0.0:
+                    factor = 10 ** (gain / 20.0)
+        return self._volume * factor
+
+    def set_gapless_enabled(self, enabled: bool):
+        self._gapless_enabled = enabled
+        from soundwave.library.config.config import save_setting
+        save_setting("gapless_enabled", enabled)
+
+    def get_gapless_enabled(self) -> bool:
+        return self._gapless_enabled
+
+    def _reset_crossfade_state(self):
+        self._cancel_crossfade_timers()
+        self._crossfade_triggered = False
+        inactive_playbin = self._playbin2 if self._playbin == self._playbin1 else self._playbin1
+        if inactive_playbin:
+            inactive_playbin.set_state(Gst.State.NULL)
+        if self._playbin:
+            self._apply_volume_with_gain()
+
+    def _finish_crossfade_immediately(self):
+        self._cancel_crossfade_timers()
+        if self._playbin:
+            self._apply_volume_with_gain()
+        inactive_playbin = self._playbin2 if self._playbin == self._playbin1 else self._playbin1
+        if inactive_playbin:
+            inactive_playbin.set_state(Gst.State.NULL)
+
     def _on_about_to_finish(self, playbin):
+        if self._crossfade_duration > 0:
+            return
+            
+        if not self._gapless_enabled:
+            return
+            
         if self._repeat_mode == RepeatMode.ONE and self._current_song:
             GLib.idle_add(lambda: self.play_file(self._current_song))
             return
+            
         next_idx = self._current_index + 1
         if next_idx >= len(self._queue):
             if self._repeat_mode == RepeatMode.ALL:
                 next_idx = 0
             else:
                 return
+                
         song = self._queue[next_idx]
         self._current_index = next_idx
         self._next_song = song
-        self._playbin.set_property("uri", Path(song.filepath).resolve().as_uri())
-        # Marcar que ya avanzamos aquí; _on_eos no debe llamar a next() de nuevo
+        playbin.set_property("uri", Path(song.filepath).resolve().as_uri())
         self._gapless_advanced = True
 
-        # Crossfade: bajar volumen gradualmente si está habilitado
-        if self._crossfade_duration > 0:
-            self._start_fade_out()
-
     def _start_fade_out(self):
-        self._cancel_crossfade_timers()
-        total_steps = int(self._crossfade_duration * 10)  # 10 pasos por segundo
-        if total_steps <= 0:
-            return
-        
-        current_volume = self._playbin.get_property("volume") if self._playbin else self._volume
-        self._crossfade_volume_step = current_volume / total_steps
-        self._crossfade_steps_remaining = total_steps
-        self._crossfade_fade_out_timer = GLib.timeout_add(100, self._fade_out_step)
+        pass
 
     def _fade_out_step(self) -> bool:
-        if not self._playbin:
-            self._crossfade_fade_out_timer = None
-            return False
-            
-        self._crossfade_steps_remaining -= 1
-        if self._crossfade_steps_remaining <= 0:
-            self._playbin.set_property("volume", 0.0)
-            self._crossfade_fade_out_timer = None
-            return False
-            
-        current_volume = self._playbin.get_property("volume")
-        new_volume = max(0.0, current_volume - self._crossfade_volume_step)
-        self._playbin.set_property("volume", new_volume)
-        return True
+        return False
 
     def _on_stream_start(self):
         if self._next_song:
             self._current_song = self._next_song
             self._next_song = None
             GLib.idle_add(lambda: self._emit_song())
-            
-            # Determinar el volumen objetivo con ganancia
-            factor = 1.0
-            if self._current_song:
-                mode = self._replaygain_mode
-                if mode == "track":
-                    gain = getattr(self._current_song, "replaygain_track_gain", 0.0)
-                    if gain != 0.0:
-                        factor = 10 ** (gain / 20.0)
-                elif mode == "album":
-                    gain = getattr(self._current_song, "replaygain_album_gain", 0.0)
-                    if gain == 0.0:
-                        gain = getattr(self._current_song, "replaygain_track_gain", 0.0)
-                    if gain != 0.0:
-                        factor = 10 ** (gain / 20.0)
-            
-            target_volume = self._volume * factor
-            
-            if self._crossfade_duration > 0:
-                self._start_fade_in(target_volume)
-            else:
-                if self._playbin:
-                    self._playbin.set_property("volume", target_volume)
+            self._apply_volume_with_gain()
+        self._gapless_advanced = False
 
     def _start_fade_in(self, target_volume: float):
-        # Asegurarse de limpiar cualquier timer previo
-        if self._crossfade_fade_out_timer is not None:
-            GLib.source_remove(self._crossfade_fade_out_timer)
-            self._crossfade_fade_out_timer = None
-        if self._crossfade_fade_in_timer is not None:
-            GLib.source_remove(self._crossfade_fade_in_timer)
-            self._crossfade_fade_in_timer = None
-
-        total_steps = int(self._crossfade_duration * 10)
-        if total_steps <= 0:
-            if self._playbin:
-                self._playbin.set_property("volume", target_volume)
-            return
-
-        current_volume = self._playbin.get_property("volume") if self._playbin else 0.0
-        self._crossfade_volume_step = (target_volume - current_volume) / total_steps
-        self._crossfade_steps_remaining = total_steps
-        self._crossfade_target_volume = target_volume
-        self._crossfade_fade_in_timer = GLib.timeout_add(100, self._fade_in_step)
+        pass
 
     def _fade_in_step(self) -> bool:
-        if not self._playbin:
-            self._crossfade_fade_in_timer = None
-            return False
-            
-        self._crossfade_steps_remaining -= 1
-        if self._crossfade_steps_remaining <= 0:
-            self._playbin.set_property("volume", self._crossfade_target_volume)
-            self._crossfade_fade_in_timer = None
-            return False
-            
-        current_volume = self._playbin.get_property("volume")
-        new_volume = min(self._crossfade_target_volume, max(0.0, current_volume + self._crossfade_volume_step))
-        self._playbin.set_property("volume", new_volume)
-        return True
+        return False
 
     def _cancel_crossfade_timers(self):
+        if self._crossfade_timer_id is not None:
+            GLib.source_remove(self._crossfade_timer_id)
+            self._crossfade_timer_id = None
         if self._crossfade_fade_out_timer is not None:
             GLib.source_remove(self._crossfade_fade_out_timer)
             self._crossfade_fade_out_timer = None
         if self._crossfade_fade_in_timer is not None:
             GLib.source_remove(self._crossfade_fade_in_timer)
             self._crossfade_fade_in_timer = None
+
+    def _trigger_crossfade_transition(self, duration: float):
+        next_idx = self._current_index + 1
+        if next_idx >= len(self._queue):
+            if self._repeat_mode == RepeatMode.ALL:
+                next_idx = 0
+            else:
+                return
+                
+        next_song = self._queue[next_idx]
+        
+        active_playbin = self._playbin
+        inactive_playbin = self._playbin2 if active_playbin == self._playbin1 else self._playbin1
+        
+        inactive_playbin.set_state(Gst.State.NULL)
+        inactive_playbin.set_property("uri", Path(next_song.filepath).resolve().as_uri())
+        inactive_playbin.set_property("volume", 0.0)
+        
+        self._apply_equalizer_gains()
+        
+        inactive_playbin.set_state(Gst.State.PLAYING)
+        
+        self._playbin = inactive_playbin
+        self._current_index = next_idx
+        self._current_song = next_song
+        self._emit_song()
+        
+        self._start_crossfade_timer(active_playbin, inactive_playbin, duration)
+
+    def _start_crossfade_timer(self, fade_out_playbin, fade_in_playbin, duration: float):
+        self._cancel_crossfade_timers()
+        
+        total_steps = int(duration * 10)
+        if total_steps <= 0:
+            fade_out_playbin.set_state(Gst.State.NULL)
+            self._apply_volume_with_gain()
+            return
+            
+        target_volume = self._get_target_volume_for_song(self._current_song)
+        start_volume_out = fade_out_playbin.get_property("volume")
+        
+        step_out = start_volume_out / total_steps
+        step_in = target_volume / total_steps
+        
+        steps_remaining = total_steps
+        
+        def crossfade_step():
+            nonlocal steps_remaining
+            steps_remaining -= 1
+            
+            if steps_remaining <= 0:
+                fade_out_playbin.set_state(Gst.State.NULL)
+                if self._playbin == fade_in_playbin:
+                    fade_in_playbin.set_property("volume", target_volume)
+                self._crossfade_timer_id = None
+                return False
+                
+            vol_out = max(0.0, fade_out_playbin.get_property("volume") - step_out)
+            fade_out_playbin.set_property("volume", vol_out)
+            
+            if self._playbin == fade_in_playbin:
+                vol_in = min(target_volume, fade_in_playbin.get_property("volume") + step_in)
+                fade_in_playbin.set_property("volume", vol_in)
+                
+            return True
+            
+        self._crossfade_timer_id = GLib.timeout_add(100, crossfade_step)
 
     def _on_bus_message(self, bus, message):
         t = message.type
-        if t == Gst.MessageType.EOS:
-            self._on_eos()
-        elif t == Gst.MessageType.STREAM_START:
-            self._on_stream_start()
-        elif t == Gst.MessageType.ERROR:
-            err, debug = message.parse_error()
-            print(f"[GStreamer] Error: {err} — {debug}")
-            self.next()
-        elif t == Gst.MessageType.STATE_CHANGED:
-            if message.src == self._playbin:
-                _, new, _ = message.parse_state_changed()
-                if new == Gst.State.PLAYING:
-                    self._set_state(PlayerState.PLAYING)
-                elif new == Gst.State.PAUSED:
-                    self._set_state(PlayerState.PAUSED)
-        elif t == Gst.MessageType.ELEMENT:
-            struct = message.get_structure()
-            if struct and struct.get_name() == "spectrum":
-                try:
-                    magnitudes = struct.get_value("magnitude")
-                    if magnitudes:
-                        if hasattr(magnitudes, "get_size"):
-                            m_list = [magnitudes.get_nth(i) for i in range(magnitudes.get_size())]
-                        else:
-                            m_list = list(magnitudes)
-                        self._emit_spectrum(m_list)
-                except TypeError:
-                    # GstValueList fallback: convert structure to string and parse values
-                    struct_str = struct.to_string()
-                    import re
-                    match = re.search(r'magnitude=(?:\([a-zA-Z]+\))?{([^}]+)}', struct_str)
-                    if not match:
-                        match = re.search(r'magnitude=\(float\)([-0-9.]+)', struct_str)
+        active_bus = self._playbin.get_bus() if self._playbin else None
+        
+        if bus == active_bus:
+            if t == Gst.MessageType.EOS:
+                self._on_eos()
+            elif t == Gst.MessageType.STREAM_START:
+                self._on_stream_start()
+            elif t == Gst.MessageType.ERROR:
+                err, debug = message.parse_error()
+                print(f"[GStreamer] Error: {err} — {debug}")
+                self.next()
+            elif t == Gst.MessageType.STATE_CHANGED:
+                if message.src == self._playbin:
+                    _, new, _ = message.parse_state_changed()
+                    if new == Gst.State.PLAYING:
+                        self._set_state(PlayerState.PLAYING)
+                    elif new == Gst.State.PAUSED:
+                        if self._crossfade_timer_id is None:
+                            self._set_state(PlayerState.PAUSED)
+            elif t == Gst.MessageType.ELEMENT:
+                struct = message.get_structure()
+                if struct and struct.get_name() == "spectrum":
+                    try:
+                        magnitudes = struct.get_value("magnitude")
+                        if magnitudes:
+                            if hasattr(magnitudes, "get_size"):
+                                m_list = [magnitudes.get_nth(i) for i in range(magnitudes.get_size())]
+                            else:
+                                m_list = list(magnitudes)
+                            self._emit_spectrum(m_list)
+                    except TypeError:
+                        struct_str = struct.to_string()
+                        import re
+                        match = re.search(r'magnitude=(?:\([a-zA-Z]+\))?{([^}]+)}', struct_str)
+                        if not match:
+                            match = re.search(r'magnitude=\(float\)([-0-9.]+)', struct_str)
+                            if match:
+                                try:
+                                    self._emit_spectrum([float(match.group(1))])
+                                except Exception:
+                                    pass
+                                return
                         if match:
                             try:
-                                self._emit_spectrum([float(match.group(1))])
+                                m_list = [float(x.strip()) for x in match.group(1).split(',') if x.strip()]
+                                if m_list:
+                                    self._emit_spectrum(m_list)
                             except Exception:
                                 pass
-                            return
-                    if match:
-                        try:
-                            m_list = [float(x.strip()) for x in match.group(1).split(',') if x.strip()]
-                            if m_list:
-                                self._emit_spectrum(m_list)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
+        else:
+            if t == Gst.MessageType.EOS:
+                message.src.set_state(Gst.State.NULL)
 
     def _on_eos(self):
         self._emit_eos()
         if self._gapless_advanced:
-            # _on_about_to_finish ya cargó la siguiente canción; solo reseteamos el flag
             self._gapless_advanced = False
         else:
-            # Avance normal: about-to-finish no se disparó (p.ej. stream muy corto)
             self.next()
 
     def _set_state(self, state: PlayerState):
         if self._state == state:
-            return  # FIX: evita doble emisión de callbacks
+            return
         self._state = state
         if state in (PlayerState.STOPPED, PlayerState.PAUSED):
             self._cancel_crossfade_timers()
@@ -722,7 +731,7 @@ class Player:
 
     def _start_position_timer(self):
         self._stop_position_timer()
-        self._position_timer = GLib.timeout_add(500, self._poll_position)
+        self._position_timer = GLib.timeout_add(100, self._poll_position)
 
     def _stop_position_timer(self):
         if self._position_timer:
@@ -730,15 +739,31 @@ class Player:
             self._position_timer = None
 
     def _poll_position(self) -> bool:
-        if self._state in (PlayerState.PLAYING, PlayerState.PAUSED):
+        if self._state == PlayerState.PLAYING:
             pos = self.get_position()
             if pos:
                 self._emit_position(pos)
-        return True  # mantener el timer vivo
+                
+                # Comprobar si se dispara la transición de crossfade
+                if (self._crossfade_duration > 0 and 
+                        not self._crossfade_triggered and 
+                        pos.duration_seconds > 0):
+                    effective_crossfade = min(self._crossfade_duration, pos.duration_seconds / 2.0)
+                    remaining_seconds = pos.duration_seconds - pos.current_seconds
+                    if remaining_seconds <= effective_crossfade:
+                        self._crossfade_triggered = True
+                        self._trigger_crossfade_transition(effective_crossfade)
+        elif self._state == PlayerState.PAUSED:
+            pos = self.get_position()
+            if pos:
+                self._emit_position(pos)
+        return True
 
     def destroy(self):
         self._stop_position_timer()
         self._cancel_crossfade_timers()
-        if self._playbin:
-            self._playbin.set_state(Gst.State.NULL)
+        if self._playbin1:
+            self._playbin1.set_state(Gst.State.NULL)
+        if self._playbin2:
+            self._playbin2.set_state(Gst.State.NULL)
         self.disconnect_all()

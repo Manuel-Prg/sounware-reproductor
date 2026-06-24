@@ -85,6 +85,15 @@ APP_CSS_TEMPLATE = """
             transform: scale(1.04);
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
         }
+        .album-cover-container, .album-fallback-square {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+        .album-card:hover .album-cover-container, .album-card:hover .album-fallback-square {
+            transform: scale(1.04);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+        }
         .album-card-title, .artist-card-name {
             font-weight: bold;
             font-size: 13px;

@@ -17,7 +17,8 @@ def main():
     loop = GLib.MainLoop()
 
     player = Player()
-    player._crossfade_duration = 2.0
+    player._crossfade_duration = 0.0
+    player.set_gapless_enabled(True)
 
     song1 = Song(id=1, filepath="/usr/share/sounds/sound-icons/xylofon.wav", title="Song 1", artist="Artist A")
     song2 = Song(id=2, filepath="/usr/share/sounds/sound-icons/cembalo-6.wav", title="Song 2", artist="Artist B")
@@ -31,13 +32,15 @@ def main():
         elapsed = time.time() - start_time
         state = player.get_state()
         curr_song = player.get_current_song()
-        vol = player._playbin.get_property("volume") if player._playbin else None
+        v1 = player._playbin1.get_property("volume") if player._playbin1 else 0.0
+        v2 = player._playbin2.get_property("volume") if player._playbin2 else 0.0
+        active_name = "playbin1" if player._playbin == player._playbin1 else "playbin2"
         pos = player.get_position()
         pos_str = f"{pos.current_seconds:.2f}/{pos.duration_seconds:.2f}" if pos else "N/A"
         
-        print(f"[{elapsed:.2f}s] State: {state.value}, Song: {curr_song.title if curr_song else 'None'}, Vol: {vol}, Pos: {pos_str}, Fade-Out Timer: {player._crossfade_fade_out_timer}, Fade-In Timer: {player._crossfade_fade_in_timer}")
+        print(f"[{elapsed:.2f}s] State: {state.value}, Song: {curr_song.title if curr_song else 'None'}, Active: {active_name}, V1: {v1:.2f}, V2: {v2:.2f}, Pos: {pos_str}, Crossfade Timer: {player._crossfade_timer_id is not None}")
         
-        if elapsed > 6.0:
+        if elapsed > 10.0:
             loop.quit()
             return False
         return True

@@ -88,6 +88,8 @@ class LibraryCardsMixin:
         box.add_css_class("album-card")
 
         overlay = Gtk.Overlay()
+        overlay.set_halign(Gtk.Align.CENTER)
+        overlay.set_valign(Gtk.Align.CENTER)
 
         # Try to find art for this album (check cache first, then DB)
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
@@ -107,12 +109,57 @@ class LibraryCardsMixin:
                     art_texture = Gdk.Texture.new_from_filename(str(art_path))
                     break
 
-        avatar = Adw.Avatar(size=120, text=album["album"], show_initials=True)
-        if art_texture:
-            avatar.set_custom_image(art_texture)
+        # Get view mode
+        view_mode = getattr(self, "_album_view_mode", "circle")
 
-        avatar.set_halign(Gtk.Align.CENTER)
-        overlay.set_child(avatar)
+        if view_mode == "grid":
+            if art_texture:
+                img_container = Gtk.Box()
+                img_container.set_size_request(120, 120)
+                img_container.set_halign(Gtk.Align.CENTER)
+                img_container.set_valign(Gtk.Align.CENTER)
+                img_container.add_css_class("album-cover-container")
+                
+                img = Gtk.Image.new_from_paintable(art_texture)
+                img.set_size_request(120, 120)
+                img.set_halign(Gtk.Align.CENTER)
+                img.set_valign(Gtk.Align.CENTER)
+                img_container.append(img)
+                
+                provider = Gtk.CssProvider()
+                provider.load_from_string(".album-cover-container { border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease, box-shadow 0.2s ease; }")
+                img_container.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                overlay.set_child(img_container)
+            else:
+                fallback = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                fallback.set_size_request(120, 120)
+                fallback.set_halign(Gtk.Align.CENTER)
+                fallback.set_valign(Gtk.Align.CENTER)
+                fallback.add_css_class("album-fallback-square")
+                
+                initials = album["album"][:2] if album["album"] else "?"
+                lbl = Gtk.Label(label=initials.upper())
+                lbl.set_halign(Gtk.Align.CENTER)
+                lbl.set_valign(Gtk.Align.CENTER)
+                lbl.set_hexpand(True)
+                lbl.set_vexpand(True)
+                fallback.append(lbl)
+                
+                import hashlib
+                colors = ["#FF512F", "#3cba92", "#ee0979", "#11998e", "#E94057", "#9733EE", "#1f4037", "#00c6ff"]
+                h = int(hashlib.md5(album["album"].encode("utf-8")).hexdigest(), 16)
+                bg_color = colors[h % len(colors)]
+                
+                provider = Gtk.CssProvider()
+                provider.load_from_string(f".album-fallback-square {{ background-color: {bg_color}; color: #ffffff; border-radius: 8px; font-weight: 800; font-size: 28px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease, box-shadow 0.2s ease; }}")
+                fallback.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                overlay.set_child(fallback)
+        else:
+            avatar = Adw.Avatar(size=120, text=album["album"], show_initials=True)
+            if art_texture:
+                avatar.set_custom_image(art_texture)
+            avatar.set_halign(Gtk.Align.CENTER)
+            overlay.set_child(avatar)
 
         # Floating Play Button in the center (visible on hover)
         play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
@@ -374,3 +421,94 @@ class LibraryCardsMixin:
             print(f"Error al aplicar la carátula personalizada: {e}")
 
     # --- Playlist Support ---
+
+    def _build_album_list_row(self, album: dict) -> Gtk.ListBoxRow:
+        row = Adw.ActionRow()
+        row.set_activatable(True)
+        row.set_title(GLib.markup_escape_text(album["album"]))
+        
+        songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
+        artist_name = album.get("album_artist", "")
+        if artist_name == UNKNOWN_ARTIST and songs:
+            artist_name = songs[0].display_artist
+        row.set_subtitle(GLib.markup_escape_text(artist_name))
+        
+        # Prefix thumbnail (40x40)
+        art_texture = None
+        for s in songs:
+            for ext in (".jpg", ".png"):
+                cached = ART_CACHE_DIR / f"{s.id}{ext}"
+                if cached.exists():
+                    try:
+                        art_texture = Gdk.Texture.new_from_filename(str(cached))
+                        break
+                    except Exception:
+                        pass
+            if art_texture:
+                break
+        if not art_texture:
+            for s in songs:
+                art_path = get_art_path(s.id, self.db) if s.id is not None else None
+                if art_path and art_path.exists():
+                    try:
+                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                        break
+                    except Exception:
+                        pass
+                    
+        thumbnail = Gtk.Box()
+        thumbnail.set_size_request(40, 40)
+        thumbnail.set_halign(Gtk.Align.CENTER)
+        thumbnail.set_valign(Gtk.Align.CENTER)
+        
+        if art_texture:
+            img = Gtk.Image.new_from_paintable(art_texture)
+            img.set_size_request(40, 40)
+            thumbnail.append(img)
+            thumbnail.add_css_class("album-list-thumb")
+            provider = Gtk.CssProvider()
+            provider.load_from_string(".album-list-thumb { border-radius: 4px; }")
+            thumbnail.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        else:
+            initials = album["album"][:1] if album["album"] else "?"
+            lbl = Gtk.Label(label=initials.upper())
+            thumbnail.append(lbl)
+            thumbnail.add_css_class("album-list-thumb-fallback")
+            
+            import hashlib
+            colors = ["#FF512F", "#3cba92", "#ee0979", "#11998e", "#E94057", "#9733EE", "#1f4037", "#00c6ff"]
+            h = int(hashlib.md5(album["album"].encode("utf-8")).hexdigest(), 16)
+            bg_color = colors[h % len(colors)]
+            
+            provider = Gtk.CssProvider()
+            provider.load_from_string(f".album-list-thumb-fallback {{ background-color: {bg_color}; color: #ffffff; border-radius: 4px; font-weight: bold; font-size: 14px; }}")
+            thumbnail.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            
+        row.add_prefix(thumbnail)
+        
+        # Song count suffix
+        song_count = len(songs)
+        count_lbl = Gtk.Label(label=f"{song_count} canciones" if song_count != 1 else "1 canción")
+        count_lbl.add_css_class("dim-label")
+        row.add_suffix(count_lbl)
+        
+        # Play button suffix
+        play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
+        play_btn.set_valign(Gtk.Align.CENTER)
+        play_btn.set_css_classes(["flat", "circular"])
+        play_btn.set_tooltip_text("Reproducir álbum")
+        play_btn.connect("clicked", lambda b, s=songs: (
+            s and [cb(s[0], s) for cb in self._play_song_cbs]
+        ))
+        row.add_suffix(play_btn)
+        
+        row.connect("activated", lambda r, a=album: self._on_album_clicked(a))
+        
+        # Right click/context menu handler
+        gesture = Gtk.GestureClick()
+        gesture.set_button(3)
+        gesture.connect("pressed", lambda g, n, x, y, a=album: self._show_album_context_menu(g, a))
+        row.add_controller(gesture)
+        
+        row._album = album
+        return row

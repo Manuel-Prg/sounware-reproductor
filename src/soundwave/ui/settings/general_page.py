@@ -201,6 +201,25 @@ class GeneralPage(Adw.PreferencesPage):
         crossfade_row.connect("notify::value", on_crossfade_changed)
         audio_group.add(crossfade_row)
 
+        # Gapless playback setting
+        gapless_row = Adw.SwitchRow()
+        gapless_row.set_title("Reproducción sin pausa")
+        gapless_row.set_subtitle("Reproduce las canciones de forma continua sin silencios entre ellas")
+        
+        # Cargar configuración actual de reproducción sin pausa
+        settings = load_settings()
+        current_gapless = settings.get("gapless_enabled", True)
+        gapless_row.set_active(current_gapless)
+
+        def on_gapless_toggled(row, pspec):
+            val = row.get_active()
+            save_setting("gapless_enabled", val)
+            if hasattr(self.parent_window, "player") and self.parent_window.player:
+                self.parent_window.player.set_gapless_enabled(val)
+
+        gapless_row.connect("notify::active", on_gapless_toggled)
+        audio_group.add(gapless_row)
+
         # Equalizer bands setting
         eq_bands_row = Adw.ComboRow()
         eq_bands_row.set_title("Bandas del Ecualizador")

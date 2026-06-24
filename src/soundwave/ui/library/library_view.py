@@ -69,6 +69,19 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._sort_btn.set_popover(self._sort_popover)
         self._header.pack_end(self._sort_btn)
 
+        # Album view mode setting and button
+        from soundwave.library.config.config import load_settings
+        settings = load_settings()
+        self._album_view_mode = settings.get("album_view_mode", "circle")
+
+        self._album_view_mode_btn = Gtk.MenuButton()
+        self._album_view_mode_btn.set_icon_name("view-grid-symbolic")
+        self._album_view_mode_btn.set_tooltip_text("Modo de vista para álbum")
+        self._album_view_mode_popover = Gtk.Popover()
+        self._album_view_mode_btn.set_popover(self._album_view_mode_popover)
+        self._album_view_mode_btn.set_visible(False)
+        self._header.pack_end(self._album_view_mode_btn)
+
         self.append(self._header)
 
         self._stack = Gtk.Stack()
@@ -116,9 +129,13 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._stack.add_named(scrolled, "songs")
 
     def _build_albums_view(self):
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._albums_main_stack = Gtk.Stack()
+        self._albums_main_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+
+        # FlowBox view (circle/grid)
+        scrolled_flow = Gtk.ScrolledWindow()
+        scrolled_flow.set_vexpand(True)
+        scrolled_flow.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self._albums_flow = Gtk.FlowBox()
         self._albums_flow.set_max_children_per_line(6)
@@ -130,8 +147,22 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._albums_flow.set_row_spacing(16)
         self._albums_flow.set_halign(Gtk.Align.FILL)
         self._albums_flow.set_valign(Gtk.Align.START)
-        scrolled.set_child(self._albums_flow)
-        self._stack.add_named(scrolled, "albums")
+        scrolled_flow.set_child(self._albums_flow)
+
+        # ListBox view (list)
+        scrolled_list = Gtk.ScrolledWindow()
+        scrolled_list.set_vexpand(True)
+        scrolled_list.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        self._albums_list = Gtk.ListBox()
+        self._albums_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._albums_list.set_css_classes(["songs-list"])
+        scrolled_list.set_child(self._albums_list)
+
+        self._albums_main_stack.add_named(scrolled_flow, "grid")
+        self._albums_main_stack.add_named(scrolled_list, "list")
+
+        self._stack.add_named(self._albums_main_stack, "albums")
 
     def _build_artists_view(self):
         scrolled = Gtk.ScrolledWindow()
@@ -356,6 +387,9 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         if hasattr(self, "_sort_btn"):
             self._sort_btn.set_visible(view_id in ["all", "albums", "playlists", "smart"])
 
+        if hasattr(self, "_album_view_mode_btn"):
+            self._album_view_mode_btn.set_visible(view_id == "albums")
+
         self._title_label.set_label({
             "all": "Todas las canciones",
             "albums": "Álbumes",
@@ -450,7 +484,17 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         return False  # Stop current invocation
 
     def _populate_albums(self):
-        clear_container(self._albums_flow)
+        self._update_album_view_mode_popover()
+
+        # Check current view mode and clear appropriate container
+        view_mode = getattr(self, "_album_view_mode", "circle")
+        if view_mode == "list":
+            self._albums_main_stack.set_visible_child_name("list")
+            clear_container(self._albums_list)
+        else:
+            self._albums_main_stack.set_visible_child_name("grid")
+            clear_container(self._albums_flow)
+
         albums = self.db.get_albums()
 
         # Sort albums
@@ -482,23 +526,90 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         # Load first 50 albums immediately, then load rest in background
         initial_batch = albums[:50]
         for album in initial_batch:
-            card = self._build_album_card(album)
-            self._albums_flow.append(card)
+            if view_mode == "list":
+                card = self._build_album_list_row(album)
+                self._albums_list.append(card)
+            else:
+                card = self._build_album_card(album)
+                self._albums_flow.append(card)
         # Load remaining albums in background
         if len(albums) > 50:
             GLib.idle_add(self._load_remaining_albums, albums, 50)
 
     def _load_remaining_albums(self, albums: list, start_index: int) -> bool:
         """Load remaining albums in batches to avoid blocking UI"""
+        view_mode = getattr(self, "_album_view_mode", "circle")
         batch_size = 25
         end_index = min(start_index + batch_size, len(albums))
         for i in range(start_index, end_index):
-            card = self._build_album_card(albums[i])
-            self._albums_flow.append(card)
+            if view_mode == "list":
+                card = self._build_album_list_row(albums[i])
+                self._albums_list.append(card)
+            else:
+                card = self._build_album_card(albums[i])
+                self._albums_flow.append(card)
         # Continue loading if there are more albums
         if end_index < len(albums):
             GLib.idle_add(self._load_remaining_albums, albums, end_index)
         return False  # Stop current invocation
+
+    def _update_album_view_mode_popover(self):
+        if not hasattr(self, "_album_view_mode_popover"):
+            return
+        content = self._build_view_mode_popover_content()
+        self._album_view_mode_popover.set_child(content)
+
+    def _build_view_mode_popover_content(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+
+        title_lbl = Gtk.Label(label="Modo de vista para álbum")
+        title_lbl.set_halign(Gtk.Align.START)
+        title_lbl.set_css_classes(["dim-label"])
+        title_lbl.set_margin_bottom(4)
+        box.append(title_lbl)
+
+        options = [
+            ("Vista en círculo", "circle"),
+            ("Vista en cuadrícula", "grid"),
+            ("Vista en lista", "list"),
+        ]
+
+        active_mode = getattr(self, "_album_view_mode", "circle")
+
+        def set_view_mode(mode):
+            from soundwave.library.config.config import save_setting
+            self._album_view_mode = mode
+            save_setting("album_view_mode", mode)
+            self._album_view_mode_popover.popdown()
+            self._populate_albums()
+
+        for label, mode in options:
+            btn = Gtk.Button()
+            btn.set_halign(Gtk.Align.FILL)
+            btn.set_css_classes(["flat"])
+
+            btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+            lbl = Gtk.Label(label=label)
+            lbl.set_xalign(0.0)
+            lbl.set_hexpand(True)
+            btn_box.append(lbl)
+
+            if mode == active_mode:
+                check_img = Gtk.Image.new_from_icon_name("object-select-symbolic")
+                check_img.set_pixel_size(12)
+                btn_box.append(check_img)
+                btn.add_css_class("suggested-action")
+
+            btn.set_child(btn_box)
+            btn.connect("clicked", lambda b, m=mode: set_view_mode(m))
+            box.append(btn)
+
+        return box
 
     def _populate_artists(self):
         clear_container(self._artists_flow)

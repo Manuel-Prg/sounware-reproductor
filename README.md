@@ -26,15 +26,31 @@ Ofrece una interfaz responsiva tipo dashboard, letras sincronizadas, un ecualiza
 
 ## 🛠 Requisitos de Instalación
 
-Asegúrate de contar con las siguientes dependencias del sistema instaladas en tu distribución Linux (instrucciones para Ubuntu/Debian):
+Asegúrate de contar con las siguientes dependencias del sistema instaladas en tu distribución Linux:
 
+**Para Ubuntu/Debian:**
 ```bash
-# Dependencias del sistema necesarias para GTK4, PyGObject, GStreamer y soporte de Cairo
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 \
+# Dependencias del sistema necesarias para GTK4, PyGObject, GStreamer, Cairo y DBus
+sudo apt install python3-gi python3-gi-cairo python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
                  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
                  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
                  gstreamer1.0-libav
 ```
+
+**Para Fedora Linux:**
+```bash
+# Dependencias del sistema necesarias para GTK4, PyGObject, GStreamer, Cairo y DBus
+sudo dnf install python3-gobject python3-cairo python3-dbus gtk4 libadwaita \
+                 gstreamer1-plugins-base gstreamer1-plugins-good \
+                 gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free
+```
+
+> [!NOTE]
+> Para reproducir formatos con patentes/propietarios (como MP3 o AAC) en Fedora, habilita los repositorios [RPM Fusion](https://rpmfusion.org/) e instala los plugins adicionales de GStreamer:
+> ```bash
+> sudo dnf install gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly gstreamer1-libav
+> ```
+
 
 ---
 
@@ -51,7 +67,7 @@ El proyecto incluye un script listo para configurar el entorno virtual de Python
     ./ejecutar.sh
     ```
 
-El script configurará automáticamente el `PYTHONPATH` necesario y utilizará el entorno virtual `.venv` para ejecutar el módulo `soundwave`.
+El script comprobará las dependencias del sistema, creará el entorno virtual `.venv` automáticamente (si no existe, compartiendo los paquetes del sistema para mayor eficiencia) e instalará las dependencias de Python necesarias antes de arrancar la aplicación.
 
 ---
 

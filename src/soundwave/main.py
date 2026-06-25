@@ -62,6 +62,15 @@ class SoundwaveApp(Adw.Application):
         theme = settings.get("theme", "system")
         apply_theme(theme)
 
+        # Force icon theme to Adwaita and lock it to prevent KDE Plasma from overriding it
+        try:
+            gtk_settings = Gtk.Settings.get_default()
+            if gtk_settings:
+                gtk_settings.set_property("gtk-icon-theme-name", "Adwaita")
+                gtk_settings.connect("notify::gtk-icon-theme-name", lambda s, p: s.set_property("gtk-icon-theme-name", "Adwaita"))
+        except Exception as e:
+            print(f"Error locking icon theme: {e}")
+
         # Initialize core components synchronously
         self._db = Database()
         self._player = Player()

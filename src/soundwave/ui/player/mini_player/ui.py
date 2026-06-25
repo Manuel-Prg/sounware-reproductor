@@ -18,9 +18,14 @@ def build_mini_player_ui(window, player, on_seek_callback, on_repeat_callback, o
     art_box.set_valign(Gtk.Align.CENTER)
 
     window._art_image = Gtk.Picture()
+    window._art_image.set_can_shrink(True)
     window._art_image.set_size_request(116, 116)
     window._art_image.set_content_fit(Gtk.ContentFit.COVER)
     window._art_image.set_css_classes(["mini-player-art"])
+    window._art_image.set_halign(Gtk.Align.CENTER)
+    window._art_image.set_valign(Gtk.Align.CENTER)
+    window._art_image.set_hexpand(False)
+    window._art_image.set_vexpand(False)
     art_box.append(window._art_image)
     window._main_box.append(art_box)
 

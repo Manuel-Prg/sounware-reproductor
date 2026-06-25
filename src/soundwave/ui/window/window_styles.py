@@ -447,6 +447,14 @@ APP_CSS_TEMPLATE = """
         .album-cover {
             border-radius: 6px;
         }
+        .player-bar .album-cover {
+            width: 56px;
+            height: 56px;
+        }
+        .visualizer-art {
+            width: 220px;
+            height: 220px;
+        }
         .green-deck-header {
             background-color: @window_bg_color;
             border-bottom: 1px solid @borders;

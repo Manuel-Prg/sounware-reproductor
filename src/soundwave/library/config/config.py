@@ -29,6 +29,9 @@ def apply_theme(theme: str) -> None:
         settings = Gtk.Settings.get_default()
         style_manager = Adw.StyleManager.get_default()
         
+        if settings:
+            settings.set_property("gtk-icon-theme-name", "Adwaita")
+        
         if theme == "light":
             if settings:
                 settings.set_property("gtk-theme-name", "Adwaita")

@@ -53,9 +53,8 @@ class PlayerBar(Gtk.CenterBox):
         left_box.set_margin_bottom(8)
         left_box.set_valign(Gtk.Align.CENTER)
 
-        self._art_image = Gtk.Picture()
-        self._art_image.set_size_request(56, 56)
-        self._art_image.set_content_fit(Gtk.ContentFit.COVER)
+        self._art_image = Gtk.Image()
+        self._art_image.set_pixel_size(56)
         self._art_image.set_css_classes(["album-cover"])
         self._art_image.set_tooltip_text("Mostrar visualizador")
         try:
@@ -366,7 +365,7 @@ class PlayerBar(Gtk.CenterBox):
     def set_artwork_from_path(self, art_path: Optional[Path]):
         if art_path and art_path.exists():
             texture = Gdk.Texture.new_from_filename(str(art_path))
-            self._art_image.set_paintable(texture)
+            self._art_image.set_from_paintable(texture)
             try:
                 from soundwave.library.metadata.color_extract import get_theme_colors_from_art
                 _, accent_hex, _ = get_theme_colors_from_art(art_path)
@@ -375,7 +374,7 @@ class PlayerBar(Gtk.CenterBox):
             except Exception:
                 pass
         else:
-            self._art_image.set_paintable(None)
+            self._art_image.set_from_paintable(None)
             self._progress_scale.reset_colors()
 
     def _on_song_changed(self, song: Optional[Song]):
@@ -385,7 +384,7 @@ class PlayerBar(Gtk.CenterBox):
             self._progress_scale.set_sensitive(False)
             self._progress_scale.set_waveform([])
             self._progress_scale.set_progress(0.0)
-            self._art_image.set_paintable(None)
+            self._art_image.set_from_paintable(None)
             return
 
         self._title_label.set_label(song.display_title)

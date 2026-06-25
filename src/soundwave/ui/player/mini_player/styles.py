@@ -43,6 +43,8 @@ def load_base_css(display):
     .mini-player-art {
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        width: 116px;
+        height: 116px;
     }
     .mini-player-title {
         font-weight: 800;
@@ -199,7 +201,7 @@ def update_theme_css(display, theme_provider, bg_hex: str, accent_hex: str, fg_h
     }}
     .mini-player-repeat-active {{
         color: {accent_hex};
-        opacity: 1.0 !important;
+        opacity: 1.0;
     }}
     .mini-player-repeat-inactive {{
         color: alpha({fg_hex}, 0.45);
@@ -265,7 +267,7 @@ def reset_theme(display, theme_provider):
     }
     .mini-player-repeat-active {
         color: @accent_bg_color;
-        opacity: 1.0 !important;
+        opacity: 1.0;
     }
     .mini-player-repeat-inactive {
         color: alpha(@window_fg_color, 0.45);

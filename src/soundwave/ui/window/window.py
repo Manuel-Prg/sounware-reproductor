@@ -457,7 +457,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
         if current_song and current_song.id == song_id:
             self._player_bar.set_artwork_from_path(art_path)
             self._mini_player.set_artwork_from_path(art_path)
-            if hasattr(self._library_view, "_visualizer_view"):
+            if getattr(self._library_view, "_visualizer_view", None) is not None:
                 self._library_view._visualizer_view.update_song(current_song)
         self._library_view._populate_albums()
         return False
@@ -477,7 +477,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
             art_path = get_art_path(song.id, self.db)
             self._player_bar.set_artwork_from_path(art_path)
             self._mini_player.set_artwork_from_path(art_path)
-            if hasattr(self._library_view, "_visualizer_view"):
+            if getattr(self._library_view, "_visualizer_view", None) is not None:
                 self._library_view._visualizer_view.update_song(song)
 
     def _check_onboarding(self):

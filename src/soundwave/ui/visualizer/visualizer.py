@@ -122,10 +122,12 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         overlay_box.set_vexpand(True)
 
         self._art_picture = Gtk.Picture()
+        self._art_picture.set_can_shrink(True)
         self._art_picture.set_size_request(220, 220)
         self._art_picture.set_content_fit(Gtk.ContentFit.CONTAIN)
         self._art_picture.set_css_classes(["album-cover", "visualizer-art"])
         self._art_picture.set_halign(Gtk.Align.CENTER)
+        self._art_picture.set_valign(Gtk.Align.CENTER)
         self._art_picture.set_hexpand(False)
         self._art_picture.set_vexpand(False)
         overlay_box.append(self._art_picture)

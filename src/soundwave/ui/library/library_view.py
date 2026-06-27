@@ -436,7 +436,7 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._update_sort_popover_content()
 
     def show_search_results(self, results: list[Song]):
-        if hasattr(self, "_visualizer_view"):
+        if self._visualizer_view:
             self._visualizer_view.on_hide()
         self._title_label.set_label(f"Resultados: {len(results)}")
         

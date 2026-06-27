@@ -121,16 +121,35 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         overlay_box.set_valign(Gtk.Align.CENTER)
         overlay_box.set_vexpand(True)
 
+        self._art_clamp = Adw.Clamp()
+        self._art_clamp.set_maximum_size(300)
+        self._art_clamp.set_tightening_threshold(300)
+        self._art_clamp.set_halign(Gtk.Align.CENTER)
+        self._art_clamp.set_valign(Gtk.Align.CENTER)
+        self._art_clamp.set_hexpand(False)
+        self._art_clamp.set_vexpand(False)
+
+        self._art_container = Gtk.Box()
+        self._art_container.set_css_classes(["visualizer-art"])
+        self._art_container.set_halign(Gtk.Align.CENTER)
+        self._art_container.set_valign(Gtk.Align.CENTER)
+        self._art_container.set_hexpand(False)
+        self._art_container.set_vexpand(False)
+        self._art_container.set_size_request(300, 300)
+
         self._art_picture = Gtk.Picture()
         self._art_picture.set_can_shrink(True)
-        self._art_picture.set_size_request(220, 220)
-        self._art_picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-        self._art_picture.set_css_classes(["album-cover", "visualizer-art"])
+        self._art_picture.set_size_request(300, 300)
+        self._art_picture.set_content_fit(Gtk.ContentFit.COVER)
+        self._art_picture.set_css_classes(["album-cover", "visualizer-art-image"])
         self._art_picture.set_halign(Gtk.Align.CENTER)
         self._art_picture.set_valign(Gtk.Align.CENTER)
         self._art_picture.set_hexpand(False)
         self._art_picture.set_vexpand(False)
-        overlay_box.append(self._art_picture)
+        
+        self._art_container.append(self._art_picture)
+        self._art_clamp.set_child(self._art_container)
+        overlay_box.append(self._art_clamp)
 
         labels_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         labels_box.set_halign(Gtk.Align.CENTER)
@@ -425,8 +444,19 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         if self._visualizer_mode == 3:
             # Mode 3: Radial / Circular spectrum surrounding the album art in the center
             cx = width / 2.0
-            cy = height / 2.0
-            r_base = 145.0  # Base radius (larger than the 220px album cover which is 110px radius)
+            cy = height / 2.0 - 90.0  # Fallback offset
+            if self._art_container and self._art_container.get_realized():
+                try:
+                    from gi.repository import Graphene
+                    p = Graphene.Point.alloc()
+                    p.init(0.0, 0.0)
+                    success, p_out = self._art_container.compute_point(self._drawing_area, p)
+                    if success:
+                        cx = p_out.x + 150.0
+                        cy = p_out.y + 150.0
+                except Exception:
+                    pass
+            r_base = 185.0  # Base radius (larger than the 300px album cover which is 150px radius)
             
             # Source gradient for radial lines
             # pyrefly: ignore [missing-attribute]

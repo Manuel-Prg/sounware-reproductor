@@ -94,6 +94,7 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
         # Connect player signals for MPRIS last.fm integration
         self.player.connect_song(self._on_player_song_changed)
         self.player.connect_position(self._on_player_position_changed)
+        self.player.connect_queue(self._on_player_queue_changed)
 
         # Sync fullscreen button state when window state changes
         self.connect("notify::fullscreened", self._on_fullscreen_changed)
@@ -160,6 +161,10 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
         if hasattr(self, "_sidebar_count_labels"):
             self._sidebar_count_labels["all"].set_text(str(stats.get("total_songs", 0)))
+            
+            queue_len = len(self.player.get_queue())
+            self._sidebar_count_labels["queue"].set_text(str(queue_len) if queue_len > 0 else "")
+
             self._sidebar_count_labels["albums"].set_text(str(stats.get("total_albums", 0)))
             self._sidebar_count_labels["artists"].set_text(str(stats.get("total_artists", 0)))
             self._sidebar_count_labels["genres"].set_text(str(genres_count))
@@ -213,6 +218,9 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
                     song.display_album, int(song.duration)
                 )
             self._scrobbled_song_id = song.id
+
+    def _on_player_queue_changed(self, queue):
+        GLib.idle_add(self._refresh_sidebar_counts)
 
     def _on_player_song_changed(self, song: Optional[Song]):
         self._scrobbled_song_id = None

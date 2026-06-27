@@ -22,6 +22,31 @@ else:
 
 import sys
 
+def setup_gtk_log_filters():
+    """Bypass noisy Gtk-WARNING logs for GtkGizmo size reports that clutter the console."""
+    import ctypes
+
+    def gtk_log_writer(log_level, fields, n_fields, user_data):
+        msg = ""
+        for field in fields:
+            if field.key == "MESSAGE":
+                val_ptr = field.value
+                length = field.length
+                if length == -1 or length == 0:
+                    msg = ctypes.string_at(val_ptr).decode("utf-8", errors="ignore")
+                else:
+                    msg = ctypes.string_at(val_ptr, length).decode("utf-8", errors="ignore")
+                break
+
+        if "GtkGizmo" in msg and ("reported min width" in msg or "reported min height" in msg):
+            return GLib.LogWriterOutput.HANDLED
+
+        return GLib.log_writer_default(log_level, fields, user_data)
+
+    GLib.log_set_writer_func(gtk_log_writer, None)
+
+setup_gtk_log_filters()
+
 from typing import Optional
 
 from soundwave.library.config.config import load_settings, apply_theme

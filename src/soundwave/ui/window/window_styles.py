@@ -130,8 +130,6 @@ APP_CSS_TEMPLATE = """
             border-radius: 12px;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
             transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
-            cursor: pointer;
-            overflow: hidden;
         }
         .genre-card:hover {
             transform: translateY(-4px) scale(1.02);
@@ -207,7 +205,6 @@ APP_CSS_TEMPLATE = """
             border-radius: 12px;
             background-color: @card_bg_color;
             transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
-            cursor: pointer;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         }
         .smart-card:hover {
@@ -278,7 +275,6 @@ APP_CSS_TEMPLATE = """
             border-radius: 12px;
             background-color: @card_bg_color;
             transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
-            cursor: pointer;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         }
         .playlist-card:hover {
@@ -359,16 +355,16 @@ APP_CSS_TEMPLATE = """
         .song-fav-active {
             color: #e02424;
             opacity: 1.0;
-            background: none !important;
-            border: none !important;
-            box-shadow: none !important;
+            background: none;
+            border: none;
+            box-shadow: none;
         }
         .song-fav-inactive {
             color: alpha(currentColor, 0.3);
             opacity: 0.6;
-            background: none !important;
-            border: none !important;
-            box-shadow: none !important;
+            background: none;
+            border: none;
+            box-shadow: none;
         }
         .song-fav-inactive:hover {
             color: alpha(#e02424, 0.7);
@@ -427,6 +423,26 @@ APP_CSS_TEMPLATE = """
             border-left: 3px solid @accent_bg_color;
             background-color: alpha(@accent_bg_color, 0.06);
         }
+        /* General Gtk.Scale overrides */
+        scale trough {
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        scale highlight {
+            background-color: @accent_bg_color;
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        scale slider {
+            background-color: @accent_bg_color;
+            border: none;
+            box-shadow: 0 2px 6px @accent_shadow_40;
+            outline: none;
+        }
+
+        /* Specific orientation styling */
         scale.horizontal trough {
             min-height: 4px;
             border-radius: 2px;
@@ -435,25 +451,111 @@ APP_CSS_TEMPLATE = """
         scale.horizontal highlight {
             min-height: 4px;
             border-radius: 2px;
-            background-color: @accent_bg_color;
         }
         scale.horizontal slider {
             min-height: 14px;
             min-width: 14px;
             border-radius: 50%;
+        }
+        scale.vertical trough {
+            min-width: 4px;
+            border-radius: 2px;
+            background-color: alpha(currentColor, 0.12);
+        }
+        scale.vertical highlight {
+            min-width: 4px;
+            border-radius: 2px;
+        }
+        scale.vertical slider {
+            min-height: 14px;
+            min-width: 14px;
+            border-radius: 50%;
+        }
+
+        /* Equalizer sliders specific overrides */
+        .equalizer-slider trough {
+            min-width: 4px;
+            border-radius: 2px;
+            background-color: alpha(currentColor, 0.12);
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        .equalizer-slider highlight {
+            min-width: 4px;
+            border-radius: 2px;
             background-color: @accent_bg_color;
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        .equalizer-slider slider {
+            min-height: 14px;
+            min-width: 14px;
+            border-radius: 50%;
+            background-color: @accent_bg_color;
+            border: none;
             box-shadow: 0 2px 6px @accent_shadow_40;
+            outline: none;
+        }
+
+        /* General Gtk.Switch overrides */
+        switch {
+            border: none;
+            outline: none;
+            box-shadow: none;
+        }
+        switch trough {
+            border: none;
+            outline: none;
+            box-shadow: none;
+        }
+        switch:checked {
+            background-color: @accent_bg_color;
+            border-color: @accent_bg_color;
+        }
+        switch:checked trough {
+            background-color: @accent_bg_color;
+            border-color: @accent_bg_color;
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        switch slider {
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+        switch:checked slider {
+            border: none;
+            box-shadow: none;
+            outline: none;
+        }
+
+        /* Suggested action buttons */
+        button.suggested-action {
+            background-color: @accent_bg_color;
+            color: @accent_fg_color;
+            border: none;
+            outline: none;
+            box-shadow: none;
+        }
+        button.suggested-action:hover {
+            background-color: @accent_hover_color;
+            border: none;
+            outline: none;
+            box-shadow: none;
         }
         .album-cover {
             border-radius: 6px;
         }
         .player-bar .album-cover {
-            width: 56px;
-            height: 56px;
+            min-width: 56px;
+            min-height: 56px;
         }
         .visualizer-art {
-            width: 220px;
-            height: 220px;
+            min-width: 300px;
+            min-height: 300px;
         }
         .green-deck-header {
             background-color: @window_bg_color;
@@ -561,7 +663,7 @@ def setup_window_css(window, css_provider: Gtk.CssProvider | None = None) -> Gtk
         Gtk.StyleContext.add_provider_for_display(
             window.get_display(),
             css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            Gtk.STYLE_PROVIDER_PRIORITY_USER,
         )
     css_provider.load_from_string(build_app_css())
     return css_provider

@@ -14,6 +14,7 @@ from soundwave.player.headphone_presets import (
     get_headphone_preset_names, get_headphone_preset,
     import_autoeq_file,
 )
+from soundwave.library.config.config import load_settings, save_setting
 
 
 class EqualizerDialog(Adw.Window):
@@ -25,17 +26,20 @@ class EqualizerDialog(Adw.Window):
         self.set_title("Ecualizador")
         self.set_default_size(700, 500)
 
-        self._band_mode: int = 10           # current number of displayed bands
+        self._loading_initial_state = True
+        self._is_destroying = False
+        self._band_mode: int = player._equalizer_n_bands  # current number of displayed bands
         self._bands: list[float] = []       # gains for current mode
         self._sliders: list[Gtk.Scale] = []
         self._labels: list[Gtk.Label] = []
 
-        # Load initial gains (10-band from engine), then convert to default mode
-        engine_gains_10 = list(player.get_equalizer_bands())
-        self._bands = list(engine_gains_10)
+        # Load initial gains from engine
+        self._bands = list(player.get_equalizer_bands())
 
         self._build_ui()
         self._setup_initial_state()
+
+        self.connect("destroy", self._on_destroy)
 
     # ──────────────────────────────────────────────────────────────
     # UI construction
@@ -186,6 +190,8 @@ class EqualizerDialog(Adw.Window):
     # ──────────────────────────────────────────────────────────────
 
     def _on_mode_changed(self, dropdown, pspec):
+        if getattr(self, "_is_destroying", False) or getattr(self, "_loading_initial_state", False):
+            return
         idx = dropdown.get_selected()
         new_mode = BAND_MODES[idx]
         if new_mode == self._band_mode:
@@ -198,30 +204,55 @@ class EqualizerDialog(Adw.Window):
         self._bands = [round(clamp_gain(g), 2) for g in self._bands]
         self._band_mode = new_mode
         self._rebuild_sliders()
+        self._player.set_equalizer_bands(self._bands, self._band_mode)
+        
+        # Reset presets since we changed band layout
+        save_setting("equalizer_preset", "Personalizado")
+        save_setting("equalizer_headphone_preset", "Ninguno")
+        self._preset_dropdown.set_selected(0)
+        self._hp_dropdown.set_selected(0)
 
     def _on_slider_changed(self, slider, scroll, value):
+        if getattr(self, "_is_destroying", False) or getattr(self, "_loading_initial_state", False):
+            return
         i = slider._band_index
         self._bands[i] = clamp_gain(value)
         self._labels[i].set_label(f"{value:+.1f}")
         self._player.set_equalizer_bands(self._bands, self._band_mode)
+        
+        # Save selection settings
+        save_setting("equalizer_preset", "Personalizado")
+        save_setting("equalizer_headphone_preset", "Ninguno")
+        
         # Deselect presets
         self._preset_dropdown.set_selected(0)
         self._hp_dropdown.set_selected(0)
 
     def _on_preset_changed(self, dropdown, pspec):
+        if getattr(self, "_is_destroying", False) or getattr(self, "_loading_initial_state", False):
+            return
         selected = dropdown.get_selected()
         if selected == 0:
+            save_setting("equalizer_preset", "Personalizado")
             return  # "Personalizado"
         names = get_preset_names()
         name = names[selected - 1]
         self._bands = get_preset(name, self._band_mode)
         self._apply_bands_to_sliders()
         self._player.set_equalizer_bands(self._bands, self._band_mode)
+        
+        # Save selection settings
+        save_setting("equalizer_preset", name)
+        save_setting("equalizer_headphone_preset", "Ninguno")
+        
         self._hp_dropdown.set_selected(0)
 
     def _on_headphone_preset_changed(self, dropdown, pspec):
+        if getattr(self, "_is_destroying", False) or getattr(self, "_loading_initial_state", False):
+            return
         selected = dropdown.get_selected()
         if selected == 0:
+            save_setting("equalizer_headphone_preset", "Ninguno")
             return  # "Ninguno"
         names = get_headphone_preset_names()
         if selected - 1 >= len(names):
@@ -242,6 +273,11 @@ class EqualizerDialog(Adw.Window):
                        for g in _interpolate_gains(src_freqs, gains_stored, dst_freqs)]
         self._apply_bands_to_sliders()
         self._player.set_equalizer_bands(self._bands, self._band_mode)
+        
+        # Save selection settings
+        save_setting("equalizer_preset", "Personalizado")
+        save_setting("equalizer_headphone_preset", name)
+        
         self._preset_dropdown.set_selected(0)
 
     def _on_delete_headphone_preset(self, btn):
@@ -254,6 +290,10 @@ class EqualizerDialog(Adw.Window):
         name = names[selected - 1]
         from soundwave.player.headphone_presets import delete_headphone_preset
         delete_headphone_preset(name)
+        
+        # Reset saved settings
+        save_setting("equalizer_headphone_preset", "Ninguno")
+        
         self._refresh_hp_dropdown()
 
     def _on_reset(self, button):
@@ -262,6 +302,11 @@ class EqualizerDialog(Adw.Window):
         self._bands = [0.0] * len(BANDS_BY_MODE[self._band_mode])
         self._apply_bands_to_sliders()
         self._player.set_equalizer_bands(self._bands, self._band_mode)
+        
+        # Save selection settings
+        save_setting("equalizer_preset", "Personalizado")
+        save_setting("equalizer_headphone_preset", "Ninguno")
+        
         self._preset_dropdown.set_selected(0)
         self._hp_dropdown.set_selected(0)
 
@@ -313,6 +358,11 @@ class EqualizerDialog(Adw.Window):
             self._apply_bands_to_sliders()
             self._player.set_equalizer_bands(self._bands, self._band_mode)
             self._refresh_hp_dropdown()
+            
+            # Save selection settings
+            save_setting("equalizer_preset", "Personalizado")
+            save_setting("equalizer_headphone_preset", preset_name)
+            
             # Select the newly imported preset
             names = get_headphone_preset_names()
             if preset_name in names:
@@ -340,17 +390,31 @@ class EqualizerDialog(Adw.Window):
                 self._labels[i].set_label(f"{self._bands[i]:+.1f}")
 
     def _setup_initial_state(self):
+        self._loading_initial_state = True
+
         enabled = self._player.get_equalizer_enabled()
         self._enable_switch.set_active(enabled)
         self._enable_switch.connect("state-set", self._on_enable_toggled)
         self._set_controls_sensitive(enabled)
 
-        # Try to match a preset
+        # Restore saved presets from settings
+        settings = load_settings()
+        saved_preset = settings.get("equalizer_preset", "Personalizado")
+        saved_hp_preset = settings.get("equalizer_headphone_preset", "Ninguno")
+
         presets = get_preset_names()
-        for idx, name in enumerate(presets):
-            if get_preset(name, self._band_mode) == self._bands:
-                self._preset_dropdown.set_selected(idx + 1)
-                break
+        if saved_preset in presets:
+            self._preset_dropdown.set_selected(presets.index(saved_preset) + 1)
+        else:
+            self._preset_dropdown.set_selected(0)
+
+        hp_names = get_headphone_preset_names()
+        if saved_hp_preset in hp_names:
+            self._hp_dropdown.set_selected(hp_names.index(saved_hp_preset) + 1)
+        else:
+            self._hp_dropdown.set_selected(0)
+
+        self._loading_initial_state = False
 
     def _set_controls_sensitive(self, sensitive: bool):
         for slider in self._sliders:
@@ -360,6 +424,11 @@ class EqualizerDialog(Adw.Window):
         self._mode_dropdown.set_sensitive(sensitive)
 
     def _on_enable_toggled(self, switch, state):
+        if getattr(self, "_is_destroying", False) or getattr(self, "_loading_initial_state", False):
+            return False
         self._player.set_equalizer_enabled(state)
         self._set_controls_sensitive(state)
         return False
+
+    def _on_destroy(self, widget):
+        self._is_destroying = True

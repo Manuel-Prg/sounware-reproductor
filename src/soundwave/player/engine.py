@@ -89,6 +89,7 @@ class Player:
         self._position_callbacks: list[PositionCallback]    = []
         self._eos_callbacks:      list[EosCallback]         = []
         self._spectrum_callbacks: list[Callable[[list[float]], None]] = []
+        self._queue_callbacks:    list[Callable[[list[Song]], None]] = []
 
         self._position_timer: Optional[int] = None
         self._crossfade_timer_id: Optional[int] = None
@@ -326,6 +327,7 @@ class Player:
 
         if self._queue and 0 <= self._current_index < len(self._queue):
             self.play_file(self._queue[self._current_index])
+        self._emit_queue()
 
     def play_index(self, index: int):
         if 0 <= index < len(self._queue):
@@ -337,6 +339,40 @@ class Player:
         self._queue.append(song)
         if self._current_index < 0:
             self._current_index = 0
+        self._emit_queue()
+
+    def play_next(self, song: Song):
+        if not self._queue:
+            self.add_to_queue(song)
+            return
+
+        idx = self._current_index + 1
+        self._queue.insert(idx, song)
+
+        # Insertar en la cola original también
+        if self._current_song and self._current_song in self._original_queue:
+            try:
+                orig_idx = self._original_queue.index(self._current_song) + 1
+                self._original_queue.insert(orig_idx, song)
+            except ValueError:
+                self._original_queue.insert(idx, song)
+        else:
+            self._original_queue.insert(idx, song)
+
+        self._emit_queue()
+
+    def reorder_queue(self, songs: list[Song]):
+        self._queue = list(songs)
+        if not self._shuffle:
+            self._original_queue = list(songs)
+        if self._current_song and self._current_song in self._queue:
+            try:
+                self._current_index = self._queue.index(self._current_song)
+            except ValueError:
+                self._current_index = -1
+        else:
+            self._current_index = -1
+        self._emit_queue()
 
     def remove_from_queue(self, index: int):
         if 0 <= index < len(self._queue):
@@ -345,11 +381,13 @@ class Player:
                 self._original_queue.remove(removed_song)
             if index <= self._current_index:
                 self._current_index = max(-1, self._current_index - 1)
+            self._emit_queue()
 
     def clear_queue(self):
         self._queue.clear()
         self._original_queue.clear()
         self._current_index = -1
+        self._emit_queue()
 
     def get_queue(self) -> list[Song]:
         return list(self._queue)
@@ -397,6 +435,7 @@ class Player:
                     self._current_index = self._queue.index(current_song)
                 else:
                     self._current_index = 0
+        self._emit_queue()
 
     def get_shuffle(self) -> bool:
         return self._shuffle
@@ -460,6 +499,7 @@ class Player:
     def connect_position(self, cb: PositionCallback):    self._position_callbacks.append(cb)
     def connect_eos(self,      cb: EosCallback):         self._eos_callbacks.append(cb)
     def connect_spectrum(self, cb: Callable[[list[float]], None]): self._spectrum_callbacks.append(cb)
+    def connect_queue(self,    cb: Callable[[list[Song]], None]): self._queue_callbacks.append(cb)
 
     def disconnect_spectrum(self, cb: Callable[[list[float]], None]):
         if cb in self._spectrum_callbacks:
@@ -469,12 +509,17 @@ class Player:
         if cb in self._song_callbacks:
             self._song_callbacks.remove(cb)
 
+    def disconnect_queue(self, cb: Callable[[list[Song]], None]):
+        if cb in self._queue_callbacks:
+            self._queue_callbacks.remove(cb)
+
     def disconnect_all(self):
         self._state_callbacks.clear()
         self._song_callbacks.clear()
         self._position_callbacks.clear()
         self._eos_callbacks.clear()
         self._spectrum_callbacks.clear()
+        self._queue_callbacks.clear()
 
     # --- Internal ---
 
@@ -729,6 +774,14 @@ class Player:
     def _emit_spectrum(self, magnitudes: list[float]):
         for cb in self._spectrum_callbacks:
             cb(magnitudes)
+
+    def _emit_queue(self):
+        q = self.get_queue()
+        for cb in self._queue_callbacks:
+            try:
+                cb(q)
+            except Exception as e:
+                print(f"[Player] Error emitting queue: {e}")
 
     def _start_position_timer(self):
         self._stop_position_timer()

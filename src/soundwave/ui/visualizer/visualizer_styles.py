@@ -10,8 +10,13 @@ VISUALIZER_CSS = """
             border-radius: 16px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             background-color: #242424;
-            width: 220px;
-            height: 220px;
+            min-width: 300px;
+            min-height: 300px;
+        }
+        .visualizer-art-image {
+            border-radius: 16px;
+            min-width: 300px;
+            min-height: 300px;
         }
         .visualizer-title {
             font-size: 20pt;

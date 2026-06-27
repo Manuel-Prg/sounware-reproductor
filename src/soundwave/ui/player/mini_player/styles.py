@@ -43,8 +43,8 @@ def load_base_css(display):
     .mini-player-art {
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-        width: 116px;
-        height: 116px;
+        min-width: 116px;
+        min-height: 116px;
     }
     .mini-player-title {
         font-weight: 800;

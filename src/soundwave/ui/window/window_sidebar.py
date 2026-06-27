@@ -51,6 +51,7 @@ class WindowSidebarMixin:
 
         items = [
             ("audio-x-generic-symbolic", "Todas las canciones", "all"),
+            ("list-drag-handle-symbolic", "Cola de reproducción", "queue"),
             ("media-optical-symbolic", "Álbumes", "albums"),
             ("avatar-default-symbolic", "Artistas", "artists"),
             ("folder-music-symbolic", "Géneros", "genres"),

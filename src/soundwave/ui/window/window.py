@@ -120,18 +120,25 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
 
     def _setup_shortcuts(self):
         ctrl = Gtk.ShortcutController()
+        ctrl.set_scope(Gtk.ShortcutScope.MANAGED)
         self.add_controller(ctrl)
 
+        def run_shortcut(callback):
+            def wrapper(*args):
+                callback()
+                return True
+            return wrapper
+
         shortcuts = [
-            ("space", lambda: self._player_bar._on_play_pause()),
-            ("<Control>Right", lambda: self.player.next()),
-            ("<Control>Left", lambda: self.player.previous()),
-            ("<Control>f", lambda: self._library_view.search_entry.grab_focus()),
-            ("Escape", lambda: self._library_view.search_entry.set_text("")),
-            ("<Control>m", lambda: self._on_toggle_mini()),
-            ("<Control>e", lambda: self._on_show_equalizer()),
-            ("F11", lambda: self._toggle_fullscreen()),
-            ("<Control>b", lambda: self._toggle_sidebar()),
+            ("space", run_shortcut(self._player_bar._on_play_pause)),
+            ("<Control>Right", run_shortcut(self.player.next)),
+            ("<Control>Left", run_shortcut(self.player.previous)),
+            ("<Control>f", run_shortcut(self._library_view.search_entry.grab_focus)),
+            ("Escape", run_shortcut(lambda: self._library_view.search_entry.set_text(""))),
+            ("<Control>m", run_shortcut(self._on_toggle_mini)),
+            ("<Control>e", run_shortcut(self._on_show_equalizer)),
+            ("F11", run_shortcut(self._toggle_fullscreen)),
+            ("<Control>b", run_shortcut(self._toggle_sidebar)),
         ]
         for trigger_str, callback in shortcuts:
             trigger = Gtk.ShortcutTrigger.parse_string(trigger_str)

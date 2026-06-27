@@ -186,7 +186,7 @@ class PlayerBar(Gtk.CenterBox):
         right_box.append(self._love_button)
 
         # Equalizer button
-        self._eq_button = Gtk.Button.new_from_icon_name("preferences-desktop-sound-symbolic")
+        self._eq_button = Gtk.Button.new_from_icon_name("multimedia-equalizer-symbolic")
         self._eq_button.set_css_classes(["flat", "circular"])
         self._eq_button.set_tooltip_text("Ecualizador (Ctrl+E)")
         self._eq_button.connect("clicked", lambda b: self._emit_show_equalizer())

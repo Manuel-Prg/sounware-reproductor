@@ -39,6 +39,12 @@ HERE="$(dirname "$(readlink -f "${0}")")"
 export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH:-}"
 export GI_TYPELIB_PATH="${HERE}/usr/lib/girepository-1.0"
 export PYTHONPATH="${HERE}/usr/bin:${PYTHONPATH:-}"
+
+# Forzar GDK_BACKEND=x11 en entornos Wayland no-GNOME para evitar congelamientos en modales y doble decoración
+if [[ "${XDG_CURRENT_DESKTOP:-}" =~ (KDE|plasma|Plasma|Hyprland|hyprland|sway|Sway|qtile|Qtile) ]] && [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+    export GDK_BACKEND=x11
+fi
+
 exec "${HERE}/usr/python/bin/python3" -m soundwave "$@"
 EOF
 chmod +x "${APPDIR}/AppRun"

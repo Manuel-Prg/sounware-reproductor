@@ -34,9 +34,9 @@ if [ ! -d "$DIR/.venv" ]; then
     "$DIR/.venv/bin/pip" install mutagen requests
 fi
 
-# 3. Detectar KDE Plasma en Wayland para forzar GDK_BACKEND=x11 (evita doble decoración y clics congelados)
-if [[ "$XDG_CURRENT_DESKTOP" =~ (KDE|plasma|Plasma) ]] && [ "$XDG_SESSION_TYPE" = "wayland" ]; then
-    echo "⚠️ Detectado KDE Plasma en Wayland. Forzando GDK_BACKEND=x11 para evitar problemas de clics en ventanas modales."
+# 3. Detectar KDE Plasma, Hyprland, Sway o Qtile en Wayland para forzar GDK_BACKEND=x11 (evita doble decoración y clics congelados)
+if [[ "$XDG_CURRENT_DESKTOP" =~ (KDE|plasma|Plasma|Hyprland|hyprland|sway|Sway|qtile|Qtile) ]] && [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+    echo "⚠️ Detectado $XDG_CURRENT_DESKTOP en Wayland. Forzando GDK_BACKEND=x11 para evitar problemas de clics en ventanas modales."
     export GDK_BACKEND=x11
 fi
 

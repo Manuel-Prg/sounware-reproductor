@@ -11,7 +11,7 @@ gi.require_version("cairo", "1.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gst", "1.0")
-from gi.repository import Gtk, Adw, GLib, Gio
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 import gi.repository.cairo
 
 # Restore original XDG_CONFIG_HOME so other modules (like config.py) can resolve user configuration paths.
@@ -70,6 +70,15 @@ class SoundwaveApp(Adw.Application):
                 gtk_settings.connect("notify::gtk-icon-theme-name", lambda s, p: s.set_property("gtk-icon-theme-name", "Adwaita"))
         except Exception as e:
             print(f"Error locking icon theme: {e}")
+
+        # Add custom icon search path to ensure we have our bundled icons across all distributions
+        try:
+            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            resources_dir = os.path.join(os.path.dirname(__file__), "resources", "icons")
+            if os.path.exists(resources_dir):
+                icon_theme.add_search_path(resources_dir)
+        except Exception as e:
+            print(f"Error loading custom icons: {e}")
 
         # Initialize core components synchronously
         self._db = Database()

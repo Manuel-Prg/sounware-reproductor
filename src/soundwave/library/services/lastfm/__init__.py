@@ -112,12 +112,24 @@ class LastFmScrobbler:
     def now_playing(self, artist: str, title: str, album: str = "",
                     duration: int = 0, track_number: int = 0):
         """Update now playing status on Last.fm."""
-        self.track.now_playing(artist, title, album, duration, track_number)
+        import threading
+        def run():
+            try:
+                self.track.now_playing(artist, title, album, duration, track_number)
+            except Exception as e:
+                print(f"Error in now_playing thread: {e}")
+        threading.Thread(target=run, daemon=True).start()
 
     def scrobble(self, artist: str, title: str, album: str = "",
                  duration: int = 0, track_number: int = 0):
         """Scrobble a track to Last.fm."""
-        self.track.scrobble(artist, title, album, duration, track_number)
+        import threading
+        def run():
+            try:
+                self.track.scrobble(artist, title, album, duration, track_number)
+            except Exception as e:
+                print(f"Error in scrobble thread: {e}")
+        threading.Thread(target=run, daemon=True).start()
 
     def love_track(self, artist: str, title: str) -> bool:
         """Love a track on Last.fm."""

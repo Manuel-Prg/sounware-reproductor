@@ -91,8 +91,14 @@ class SoundwaveApp(Adw.Application):
         try:
             gtk_settings = Gtk.Settings.get_default()
             if gtk_settings:
-                gtk_settings.set_property("gtk-icon-theme-name", "Adwaita")
-                gtk_settings.connect("notify::gtk-icon-theme-name", lambda s, p: s.set_property("gtk-icon-theme-name", "Adwaita"))
+                if gtk_settings.get_property("gtk-icon-theme-name") != "Adwaita":
+                    gtk_settings.set_property("gtk-icon-theme-name", "Adwaita")
+                
+                def on_icon_theme_changed(settings, pspec):
+                    if settings.get_property("gtk-icon-theme-name") != "Adwaita":
+                        settings.set_property("gtk-icon-theme-name", "Adwaita")
+                
+                gtk_settings.connect("notify::gtk-icon-theme-name", on_icon_theme_changed)
         except Exception as e:
             print(f"Error locking icon theme: {e}")
 

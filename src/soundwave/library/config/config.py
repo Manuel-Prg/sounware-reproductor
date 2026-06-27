@@ -30,19 +30,23 @@ def apply_theme(theme: str) -> None:
         style_manager = Adw.StyleManager.get_default()
         
         if settings:
-            settings.set_property("gtk-icon-theme-name", "Adwaita")
+            if settings.get_property("gtk-icon-theme-name") != "Adwaita":
+                settings.set_property("gtk-icon-theme-name", "Adwaita")
         
         if theme == "light":
             if settings:
-                settings.set_property("gtk-theme-name", "Adwaita")
+                if settings.get_property("gtk-theme-name") != "Adwaita":
+                    settings.set_property("gtk-theme-name", "Adwaita")
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
         elif theme == "dark":
             if settings:
-                settings.set_property("gtk-theme-name", "Adwaita")
+                if settings.get_property("gtk-theme-name") != "Adwaita":
+                    settings.set_property("gtk-theme-name", "Adwaita")
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         else: # system
             if settings:
-                settings.reset_property("gtk-theme-name")
+                if settings.get_property("gtk-theme-name") is not None:
+                    settings.reset_property("gtk-theme-name")
             style_manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
     except Exception as e:
         print(f"Error al aplicar el tema {theme}: {e}")

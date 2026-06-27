@@ -32,6 +32,7 @@ def generate_waveform_data(filepath: str, num_points: int = 150) -> list[float]:
         sink.set_property("emit-signals", True)
         sink.set_property("max-buffers", 1)
         sink.set_property("drop", False)
+        sink.set_property("sync", False)
         
         if not all([src, dec, conv, filt, sink]):
             return []

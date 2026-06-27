@@ -139,6 +139,8 @@ class LibraryPlaylistsMixin:
         self._title_label.set_label(plist.name)
         
         self._current_playlist_id = plist.id
+        self._song_sort_criteria = "playlist"
+        self._song_sort_order = "asc"
         self._all_songs = songs
         self._sort_songs_list()
         

@@ -78,6 +78,9 @@ class LibrarySortingMixin:
                 ("Compositor - descendente", "composer", "desc"),
             ]
             
+            if getattr(self, "_current_playlist_id", None) is not None:
+                options.insert(0, ("Orden de la lista", "playlist", "asc"))
+            
             active_crit = getattr(self, "_song_sort_criteria", "title")
             active_ord = getattr(self, "_song_sort_order", "asc")
             
@@ -137,7 +140,17 @@ class LibrarySortingMixin:
         descending = (order == "desc")
 
         def sort_key(s: Song):
-            if criteria == "title":
+            if criteria == "playlist" and getattr(self, "_current_playlist_id", None) is not None:
+                playlist_id = self._current_playlist_id
+                if not hasattr(self, "_playlist_pos_cache") or getattr(self, "_playlist_pos_cache_id", None) != playlist_id:
+                    rows = self.db.conn.execute(
+                        "SELECT song_id, position FROM playlists_songs WHERE playlist_id = ? ORDER BY position",
+                        (playlist_id,)
+                    ).fetchall()
+                    self._playlist_pos_cache = {r["song_id"]: r["position"] for r in rows}
+                    self._playlist_pos_cache_id = playlist_id
+                return self._playlist_pos_cache.get(s.id, 999999)
+            elif criteria == "title":
                 return (s.title or "").lower()
             elif criteria == "artist":
                 return (s.artist or "").lower()

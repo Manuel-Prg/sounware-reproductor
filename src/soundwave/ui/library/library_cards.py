@@ -1,7 +1,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio
+from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio, GObject
 
 from pathlib import Path
 from typing import Optional
@@ -50,8 +50,77 @@ class LibraryCardsMixin:
         menu_btn.connect("clicked", lambda b, s=song: self._show_song_menu(b, s))
         row.add_suffix(menu_btn)
 
-        # If we are viewing inside a custom playlist, add a "remove from playlist" button
+        # If we are viewing inside a custom playlist, add drag handle and remove button
         if playlist_id is not None:
+            # 1. Add drag handle on the left
+            handle_img = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
+            handle_img.set_valign(Gtk.Align.CENTER)
+            handle_img.add_css_class("dim-label")
+            row.add_prefix(handle_img)
+            
+            # 2. Attach DragSource to the handle
+            drag_source = Gtk.DragSource.new()
+            drag_source.set_actions(Gdk.DragAction.MOVE)
+            
+            def on_drag_prepare(source, x, y, r=row):
+                self._dragged_row = r
+                return Gdk.ContentProvider.new_for_value("row")
+            drag_source.connect("prepare", on_drag_prepare)
+            
+            def on_drag_cancel(source, drag, reason):
+                self._dragged_row = None
+                return False
+            drag_source.connect("drag-cancel", on_drag_cancel)
+            
+            handle_img.add_controller(drag_source)
+            
+            # 3. Attach DropTarget to the whole action row
+            drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+            
+            def on_enter(target, x, y, target_row=row):
+                dragged_row = getattr(self, "_dragged_row", None)
+                if dragged_row and dragged_row != target_row:
+                    listbox = target_row.get_parent()
+                    if listbox:
+                        target_idx = target_row.get_index()
+                        listbox.remove(dragged_row)
+                        listbox.insert(dragged_row, target_idx)
+                return Gdk.DragAction.MOVE
+            drop_target.connect("enter", on_enter)
+            
+            def on_drop(target, value, x, y, target_row=row):
+                listbox = target_row.get_parent()
+                if listbox:
+                    song_ids = []
+                    child = listbox.get_first_child()
+                    while child:
+                        s = getattr(child, "_song", None)
+                        if s:
+                            song_ids.append(s.id)
+                        child = child.get_next_sibling()
+                    
+                    # Update DB
+                    self.db.reorder_playlist(playlist_id, song_ids)
+                    
+                    # Update position cache
+                    self._playlist_pos_cache = {sid: idx for idx, sid in enumerate(song_ids)}
+                    self._playlist_pos_cache_id = playlist_id
+                    
+                    # Update current list of songs
+                    new_all_songs = []
+                    for sid in song_ids:
+                        s = self.db.get_song(sid)
+                        if s:
+                            new_all_songs.append(s)
+                    self._all_songs = new_all_songs
+                    
+                    self._dragged_row = None
+                    return True
+                return False
+            drop_target.connect("drop", on_drop)
+            row.add_controller(drop_target)
+
+            # 4. Remove button
             remove_btn = Gtk.Button.new_from_icon_name("list-remove-symbolic")
             remove_btn.set_valign(Gtk.Align.CENTER)
             remove_btn.set_css_classes(["flat", "circular"])

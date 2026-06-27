@@ -61,6 +61,9 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._album_sort_criteria = "album"
         self._album_sort_order = "asc"
         self._current_playlist_id = None
+        self._dragged_row = None
+        self._playlist_pos_cache = {}
+        self._playlist_pos_cache_id = None
 
         self._sort_btn = Gtk.MenuButton()
         self._sort_btn.set_icon_name("view-sort-ascending-symbolic")
@@ -457,6 +460,8 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
     # --- Populate views ---
     def _populate_songs(self):
         self._current_playlist_id = None
+        if getattr(self, "_song_sort_criteria", "title") == "playlist":
+            self._song_sort_criteria = "title"
         clear_container(self._songs_list)
         # Load songs in chunks to improve startup performance
         self._all_songs = self.db.get_all_songs()

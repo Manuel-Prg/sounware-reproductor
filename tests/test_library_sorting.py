@@ -114,3 +114,52 @@ class TestLibrarySorting(unittest.TestCase):
         self.assertEqual(sort_albums("year", "asc"), ["Gamma Album", "Beta Album", "Alpha Album"])
         # 4. Total Duration Descending
         self.assertEqual(sort_albums("total_duration", "desc"), ["Beta Album", "Alpha Album", "Gamma Album"])
+
+    def test_playlist_reordering_and_sorting(self):
+        # 1. Create a playlist
+        playlist_id = self.db.create_playlist("Test Playlist")
+        
+        # 2. Get song ids
+        songs = self.db.get_all_songs()
+        song_ids = [s.id for s in songs]
+        
+        # Add to playlist in that order
+        self.db.add_to_playlist(playlist_id, song_ids[0])
+        self.db.add_to_playlist(playlist_id, song_ids[1])
+        self.db.add_to_playlist(playlist_id, song_ids[2])
+        
+        # 3. Reorder playlist
+        new_order = [song_ids[2], song_ids[0], song_ids[1]]
+        self.db.reorder_playlist(playlist_id, new_order)
+        
+        # 4. Retrieve playlist and check song_ids order
+        playlists = self.db.get_playlists()
+        my_pl = [p for p in playlists if p.id == playlist_id][0]
+        self.assertEqual(my_pl.song_ids, new_order)
+        
+        # 5. Test sorting by "playlist"
+        self._current_playlist_id = playlist_id
+        self._song_sort_criteria = "playlist"
+        self._song_sort_order = "asc"
+        
+        # Verify sort key logic
+        def sort_key(s: Song):
+            criteria = self._song_sort_criteria
+            playlist_id = self._current_playlist_id
+            if criteria == "playlist" and playlist_id is not None:
+                if not hasattr(self, "_playlist_pos_cache") or getattr(self, "_playlist_pos_cache_id", None) != playlist_id:
+                    rows = self.db.conn.execute(
+                        "SELECT song_id, position FROM playlists_songs WHERE playlist_id = ? ORDER BY position",
+                        (playlist_id,)
+                    ).fetchall()
+                    self._playlist_pos_cache = {r["song_id"]: r["position"] for r in rows}
+                    self._playlist_pos_cache_id = playlist_id
+                return self._playlist_pos_cache.get(s.id, 999999)
+            return (s.title or "").lower()
+            
+        test_songs = list(songs)
+        test_songs.sort(key=sort_key)
+        
+        sorted_ids = [s.id for s in test_songs]
+        self.assertEqual(sorted_ids, new_order)
+

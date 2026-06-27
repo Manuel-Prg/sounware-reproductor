@@ -146,6 +146,7 @@ class Player:
             spec.set_property("threshold", -75)
             spec.set_property("post-messages", True)
             spec.set_property("message-magnitude", True)
+            spec.set_property("interval", 33 * Gst.MSECOND)
 
             filt_bin = Gst.Bin.new(f"audio-filter-bin-{eq_name}")
             filt_bin.add(eq)

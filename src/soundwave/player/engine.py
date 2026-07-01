@@ -110,15 +110,22 @@ class Player:
     # --- Pipeline (construir una sola vez) ---
 
     def _create_playbin(self, name: str) -> Gst.Element:
-        playbin = Gst.ElementFactory.make("playbin3", name)
+        # Preferimos playbin clásico para evitar problemas de buffering/latencia conocidos de playbin3 en archivos locales
+        playbin = Gst.ElementFactory.make("playbin", name)
         if playbin is None:
-            playbin = Gst.ElementFactory.make("playbin", name)
+            playbin = Gst.ElementFactory.make("playbin3", name)
         if playbin is None:
             raise RuntimeError(f"No se pudo crear {name}. Verifica gstreamer1.0-plugins-base.")
         
         playbin.set_property("volume", self._volume)
-        playbin.set_property("buffer-size", 4096)
+        playbin.set_property("buffer-size", 2 * 1024 * 1024)
         
+        # Ignorar pistas de video y subtítulos para optimizar la decodificación de audio (sólo audio = 2)
+        try:
+            playbin.set_property("flags", 2)
+        except Exception:
+            pass
+            
         bus = playbin.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self._on_bus_message)
@@ -710,6 +717,8 @@ class Player:
             elif t == Gst.MessageType.ELEMENT:
                 struct = message.get_structure()
                 if struct and struct.get_name() == "spectrum":
+                    if not self._spectrum_callbacks:
+                        return
                     try:
                         magnitudes = struct.get_value("magnitude")
                         if magnitudes:

@@ -155,28 +155,33 @@ class LibraryCardsMixin:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_size_request(140, -1)
         box.add_css_class("album-card")
+        box.set_valign(Gtk.Align.START)
 
         overlay = Gtk.Overlay()
         overlay.set_halign(Gtk.Align.CENTER)
         overlay.set_valign(Gtk.Align.CENTER)
 
-        # Try to find art for this album (check cache first, then DB)
-        songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
+        # Try to find art for this album using representative_song_id directly (extremely fast)
         art_texture = None
-        for s in songs:
+        rep_id = album.get("representative_song_id")
+        if rep_id is not None:
+            # Check cache first
             for ext in (".jpg", ".png"):
-                cached = ART_CACHE_DIR / f"{s.id}{ext}"
+                cached = ART_CACHE_DIR / f"{rep_id}{ext}"
                 if cached.exists():
-                    art_texture = Gdk.Texture.new_from_filename(str(cached))
-                    break
-            if art_texture:
-                break
-        if not art_texture:
-            for s in songs:
-                art_path = get_art_path(s.id, self.db) if s.id is not None else None
-                if art_path and art_path.exists():
-                    art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                    break
+                    try:
+                        art_texture = Gdk.Texture.new_from_filename(str(cached))
+                        break
+                    except Exception:
+                        pass
+            # If not in cache, check DB
+            if not art_texture:
+                try:
+                    art_path = get_art_path(rep_id, self.db)
+                    if art_path and art_path.exists():
+                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                except Exception:
+                    pass
 
         # Get view mode
         view_mode = getattr(self, "_album_view_mode", "circle")
@@ -236,10 +241,15 @@ class LibraryCardsMixin:
         play_btn.set_halign(Gtk.Align.CENTER)
         play_btn.set_valign(Gtk.Align.CENTER)
         play_btn.set_size_request(44, 44)
-        album_songs = songs
-        play_btn.connect("clicked", lambda b, a=album, s=album_songs: (
-            s and [cb(s[0], s) for cb in self._play_song_cbs]
-        ))
+        
+        def on_play_clicked(btn, a=album):
+            album_songs = self.db.get_songs_by_album(a["album"], a.get("album_artist", ""))
+            if album_songs:
+                first = album_songs[0]
+                for cb in self._play_song_cbs:
+                    cb(first, album_songs)
+                    
+        play_btn.connect("clicked", on_play_clicked)
         overlay.add_overlay(play_btn)
 
         box.append(overlay)
@@ -248,23 +258,24 @@ class LibraryCardsMixin:
         title = Gtk.Label(label=album["album"])
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_max_width_chars(16)
+        title.set_lines(1)
         title.set_xalign(0.5)
         title.add_css_class("album-card-title")
         box.append(title)
 
-        # Subtitle (Artist) - Use artist from songs if album_artist is unknown
+        # Subtitle (Artist)
         artist_name = album.get("album_artist", "")
-        if artist_name == UNKNOWN_ARTIST and songs:
-            # Try to get artist from the first song
-            artist_name = songs[0].display_artist
+        if artist_name == UNKNOWN_ARTIST:
+            artist_name = "Artista desconocido"
         artist = Gtk.Label(label=artist_name)
         artist.set_ellipsize(Pango.EllipsizeMode.END)
         artist.set_max_width_chars(18)
+        artist.set_lines(1)
         artist.set_xalign(0.5)
         artist.add_css_class("album-card-subtitle")
         box.append(artist)
 
-        # Click handler - play album (left click) or context menu (right click)
+        # Click handler
         gesture = Gtk.GestureClick()
         gesture.set_button(0)  # Listen to all mouse buttons
         gesture.connect("pressed", lambda g, n, x, y, a=album: self._on_album_card_pressed(g, n, x, y, a))
@@ -276,15 +287,29 @@ class LibraryCardsMixin:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.set_size_request(140, -1)
         card.add_css_class("artist-card")
+        card.set_valign(Gtk.Align.START)
 
-        # Let's find an album cover to use as the artist's avatar image
-        songs = self.db.get_songs_by_artist(artist["artist"])
+        # Find artist cover using representative_song_id directly (extremely fast)
         art_texture = None
-        for s in songs:
-            art_path = get_art_path(s.id, self.db) if s.id is not None else None
-            if art_path and art_path.exists():
-                art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                break
+        rep_id = artist.get("representative_song_id")
+        if rep_id is not None:
+            # Check cache first
+            for ext in (".jpg", ".png"):
+                cached = ART_CACHE_DIR / f"{rep_id}{ext}"
+                if cached.exists():
+                    try:
+                        art_texture = Gdk.Texture.new_from_filename(str(cached))
+                        break
+                    except Exception:
+                        pass
+            # If not in cache, check DB
+            if not art_texture:
+                try:
+                    art_path = get_art_path(rep_id, self.db)
+                    if art_path and art_path.exists():
+                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                except Exception:
+                    pass
 
         avatar = Adw.Avatar(size=120, text=artist["artist"], show_initials=True)
         if art_texture:
@@ -297,6 +322,7 @@ class LibraryCardsMixin:
         name = Gtk.Label(label=artist["artist"])
         name.set_ellipsize(Pango.EllipsizeMode.END)
         name.set_max_width_chars(16)
+        name.set_lines(1)
         name.set_xalign(0.5)
         name.add_css_class("artist-card-name")
         card.append(name)
@@ -306,6 +332,7 @@ class LibraryCardsMixin:
         subtitle = Gtk.Label(label=subtitle_text)
         subtitle.set_ellipsize(Pango.EllipsizeMode.END)
         subtitle.set_max_width_chars(18)
+        subtitle.set_lines(1)
         subtitle.set_xalign(0.5)
         subtitle.add_css_class("artist-card-subtitle")
         card.append(subtitle)
@@ -323,6 +350,7 @@ class LibraryCardsMixin:
         # Gtk.Overlay allows us to overlay text on top of a background image/icon
         overlay = Gtk.Overlay()
         overlay.add_css_class("genre-card")
+        overlay.set_valign(Gtk.Align.START)
         
         # Calculate a stable hash based on the genre name to pick a gradient index (0-7)
         genre_name = g["genre"]
@@ -496,34 +524,32 @@ class LibraryCardsMixin:
         row.set_activatable(True)
         row.set_title(GLib.markup_escape_text(album["album"]))
         
-        songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
         artist_name = album.get("album_artist", "")
-        if artist_name == UNKNOWN_ARTIST and songs:
-            artist_name = songs[0].display_artist
+        if artist_name == UNKNOWN_ARTIST:
+            artist_name = "Artista desconocido"
         row.set_subtitle(GLib.markup_escape_text(artist_name))
         
         # Prefix thumbnail (40x40)
         art_texture = None
-        for s in songs:
+        rep_id = album.get("representative_song_id")
+        if rep_id is not None:
+            # Check cache first
             for ext in (".jpg", ".png"):
-                cached = ART_CACHE_DIR / f"{s.id}{ext}"
+                cached = ART_CACHE_DIR / f"{rep_id}{ext}"
                 if cached.exists():
                     try:
                         art_texture = Gdk.Texture.new_from_filename(str(cached))
                         break
                     except Exception:
                         pass
-            if art_texture:
-                break
-        if not art_texture:
-            for s in songs:
-                art_path = get_art_path(s.id, self.db) if s.id is not None else None
-                if art_path and art_path.exists():
-                    try:
+            # If not in cache, check DB
+            if not art_texture:
+                try:
+                    art_path = get_art_path(rep_id, self.db)
+                    if art_path and art_path.exists():
                         art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                        break
-                    except Exception:
-                        pass
+                except Exception:
+                    pass
                     
         thumbnail = Gtk.Box()
         thumbnail.set_size_request(40, 40)
@@ -556,7 +582,7 @@ class LibraryCardsMixin:
         row.add_prefix(thumbnail)
         
         # Song count suffix
-        song_count = len(songs)
+        song_count = album.get("song_count") or 0
         count_lbl = Gtk.Label(label=f"{song_count} canciones" if song_count != 1 else "1 canción")
         count_lbl.add_css_class("dim-label")
         row.add_suffix(count_lbl)
@@ -566,9 +592,15 @@ class LibraryCardsMixin:
         play_btn.set_valign(Gtk.Align.CENTER)
         play_btn.set_css_classes(["flat", "circular"])
         play_btn.set_tooltip_text("Reproducir álbum")
-        play_btn.connect("clicked", lambda b, s=songs: (
-            s and [cb(s[0], s) for cb in self._play_song_cbs]
-        ))
+        
+        def on_play_clicked(btn, a=album):
+            album_songs = self.db.get_songs_by_album(a["album"], a.get("album_artist", ""))
+            if album_songs:
+                first = album_songs[0]
+                for cb in self._play_song_cbs:
+                    cb(first, album_songs)
+                    
+        play_btn.connect("clicked", on_play_clicked)
         row.add_suffix(play_btn)
         
         row.connect("activated", lambda r, a=album: self._on_album_clicked(a))

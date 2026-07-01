@@ -170,20 +170,13 @@ class LibrarySortingMixin:
 
     def _sort_and_refresh_songs(self):
         self._sort_songs_list()
-        
+
+        from soundwave.ui.library.song_object import SongObject
         current_child = self._stack.get_visible_child_name()
+
+        objects = [SongObject(song) for song in self._all_songs]
         if current_child == "search":
-            clear_container(self._search_list)
-            for song in self._all_songs:
-                row = self._build_song_row(song)
-                self._search_list.append(row)
+            self._search_store.splice(0, self._search_store.get_n_items(), objects)
         else:
-            clear_container(self._songs_list)
-            playlist_id = getattr(self, "_current_playlist_id", None)
-            
-            initial_batch = self._all_songs[:100]
-            for song in initial_batch:
-                row = self._build_song_row(song, playlist_id=playlist_id)
-                self._songs_list.append(row)
-            if len(self._all_songs) > 100:
-                GLib.idle_add(self._load_remaining_songs, 100)
+            # Virtualised songs store (used by both general songs list and playlists now)
+            self._songs_store.splice(0, self._songs_store.get_n_items(), objects)

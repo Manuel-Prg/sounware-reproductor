@@ -24,9 +24,13 @@ cat > "${APPDIR}/usr/share/applications/${APP_ID}.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=${APP_NAME}
+Comment=Reproductor de música moderno para Linux
 Exec=soundwave
 Icon=${APP_ID}
-Categories=Audio;Music;Player;
+Categories=AudioVideo;Audio;Music;Player;
+MimeType=audio/mpeg;audio/flac;audio/ogg;audio/x-m4a;audio/wav;audio/aac;audio/opus;
+Terminal=false
+StartupNotify=true
 EOF
 
 cp data/icons/icono-light-256.png \
@@ -52,12 +56,19 @@ chmod +x "${APPDIR}/AppRun"
 export GST_PLUGIN_PATH="${APPDIR}/usr/lib/gstreamer-1.0"
 export GST_PLUGIN_SYSTEM_PATH_1_0="${APPDIR}/usr/lib/gstreamer-1.0"
 
-# 5. linuxdeploy detecta y empaqueta las dependencias automáticamente
-export NO_STRIP=1  # evita romper símbolos de GStreamer plugins
+# 5. Eliminar AppImage anterior para evitar conflictos de versiones"
+#    (ocurre cuando el .AppImage previo está montado o ejecutándose)
+rm -f "$(pwd)"/Soundwave-*.AppImage "$(pwd)"/build-appimage/Soundwave-*.AppImage 2>/dev/null || true
+
+# 6. linuxdeploy detecta y empaqueta las dependencias automáticamente
+#    ARCH debe estar seteado para que appimagetool sepa qué runtime descargar
+export ARCH=x86_64
 "${BUILD_DIR}/linuxdeploy" \
   --appdir "${APPDIR}" \
   --desktop-file "${APPDIR}/usr/share/applications/${APP_ID}.desktop" \
   --icon-file "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png" \
   --output appimage
 
+# Mover el AppImage generado al directorio build para mantener el proyecto ordenado
+mv -f "$(pwd)"/Soundwave-*.AppImage "${BUILD_DIR}/" 2>/dev/null || true
 echo "AppImage generado en ${BUILD_DIR}/"

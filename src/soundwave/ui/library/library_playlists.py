@@ -7,6 +7,7 @@ import hashlib
 
 from soundwave.ui.library.library_dialogs import CreatePlaylistDialog
 from soundwave.ui.components.utils import clear_container
+from soundwave.ui.library.song_object import SongObject
 
 
 class LibraryPlaylistsMixin:
@@ -133,25 +134,21 @@ class LibraryPlaylistsMixin:
             s = self.db.get_song(sid)
             if s:
                 songs.append(s)
+
         self._previous_view_id = self._current_view_id
         if hasattr(self, "_back_btn"):
             self._back_btn.set_visible(True)
         self._title_label.set_label(plist.name)
-        
+
         self._current_playlist_id = plist.id
         self._song_sort_criteria = "playlist"
         self._song_sort_order = "asc"
         self._all_songs = songs
         self._sort_songs_list()
-        
-        clear_container(self._songs_list)
-        initial_batch = self._all_songs[:100]
-        for s in initial_batch:
-            r = self._build_song_row(s, playlist_id=plist.id)
-            self._songs_list.append(r)
-        if len(self._all_songs) > 100:
-            GLib.idle_add(self._load_remaining_songs, 100)
-            
+
+        objects = [SongObject(s) for s in self._all_songs]
+        self._songs_store.splice(0, self._songs_store.get_n_items(), objects)
+
         self._stack.set_visible_child_name("songs")
         if hasattr(self, "_sort_btn"):
             self._sort_btn.set_visible(True)

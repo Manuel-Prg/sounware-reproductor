@@ -67,7 +67,7 @@ APP_CSS_TEMPLATE = """
         .album-grid flowboxchild, .artist-grid flowboxchild {
             padding: 8px;
             border-radius: 12px;
-            transition: all 0.2s ease;
+            transition: background-color 0.2s ease;
         }
         .album-grid flowboxchild:hover, .artist-grid flowboxchild:hover {
             background-color: alpha(@accent_bg_color, 0.04);
@@ -561,6 +561,7 @@ APP_CSS_TEMPLATE = """
             background-color: @window_bg_color;
             border-bottom: 1px solid @borders;
         }
+        /* ListBox rows (album details, playlist, queue) */
         .songs-list > row {
             border-radius: 8px;
             padding: 4px 12px;
@@ -578,6 +579,26 @@ APP_CSS_TEMPLATE = """
             color: @window_fg_color;
         }
         .songs-list > row:selected label.subtitle {
+            color: alpha(@window_fg_color, 0.6);
+        }
+        /* Gtk.ListView items (virtualised main songs view and search results) */
+        listview.songs-list > row {
+            border-radius: 8px;
+            padding: 2px 8px;
+            margin: 1px 8px;
+            transition: background-color 0.15s ease;
+        }
+        listview.songs-list > row:hover {
+            background-color: alpha(@accent_bg_color, 0.04);
+        }
+        listview.songs-list > row:selected {
+            background-color: alpha(@accent_bg_color, 0.15);
+            color: @window_fg_color;
+        }
+        listview.songs-list > row:selected label {
+            color: @window_fg_color;
+        }
+        listview.songs-list > row:selected label.subtitle {
             color: alpha(@window_fg_color, 0.6);
         }
         .lyrics-line {

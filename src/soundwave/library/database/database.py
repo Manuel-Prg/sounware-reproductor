@@ -223,7 +223,8 @@ class Database:
                 MAX(year) as year,
                 MAX(added_at) as added_at,
                 MAX(artist) as artist,
-                MAX(composer) as composer
+                MAX(composer) as composer,
+                MAX(id) as representative_song_id
             FROM songs
             GROUP BY 
                 CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END,
@@ -231,13 +232,14 @@ class Database:
             ORDER BY album_artist, album
         """).fetchall()
         return [dict(r) for r in rows]
-
+ 
     def get_artists(self) -> list[dict]:
         rows = self.conn.execute("""
             SELECT 
                 CASE WHEN artist = '' OR artist IS NULL THEN 'Artista desconocido' ELSE artist END as artist,
                 COUNT(*) as song_count,
-                COUNT(DISTINCT CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END) as album_count
+                COUNT(DISTINCT CASE WHEN album = '' OR album IS NULL THEN 'Álbum desconocido' ELSE album END) as album_count,
+                MAX(id) as representative_song_id
             FROM songs
             GROUP BY 
                 CASE WHEN artist = '' OR artist IS NULL THEN 'Artista desconocido' ELSE artist END

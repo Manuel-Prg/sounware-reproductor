@@ -3,7 +3,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, GLib
 
 
 class WindowSidebarMixin:
@@ -83,7 +83,11 @@ class WindowSidebarMixin:
         # Select first
         first = self._sidebar_list.get_row_at_index(0)
         if first:
-            self._sidebar_list.select_row(first)
+            def _select_initial():
+                if self._sidebar_list.get_mapped():
+                    self._sidebar_list.select_row(first)
+                return False
+            GLib.idle_add(_select_initial)
             self._current_view = "all"
 
         return sidebar

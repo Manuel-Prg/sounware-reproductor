@@ -6,6 +6,19 @@ VISUALIZER_CSS = """
         .visualizer-bg {
             background-color: #080808;
         }
+        .visualizer-bg-image {
+            filter: blur(10px);
+            opacity: 0.50;
+        }
+        .visualizer-bg-dimmer {
+            background-color: rgba(12, 12, 16, 0.55);
+            background-image: linear-gradient(
+                135deg,
+                rgba(255, 255, 255, 0.08) 0%,
+                rgba(255, 255, 255, 0.02) 40%,
+                rgba(0, 0, 0, 0.3) 100%
+            );
+        }
         .visualizer-art {
             border-radius: 16px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);

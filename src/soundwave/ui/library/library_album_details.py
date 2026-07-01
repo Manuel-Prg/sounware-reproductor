@@ -6,6 +6,7 @@ from gi.repository import Gtk, Adw, Gdk
 from soundwave.library.database.database import Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM
 from soundwave.library.metadata.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
 from soundwave.ui.components.utils import clear_container
+from soundwave.ui.library.song_object import SongObject
 
 
 class LibraryAlbumDetailsMixin:
@@ -91,17 +92,18 @@ class LibraryAlbumDetailsMixin:
         self._stack.add_named(scrolled, "album_details")
 
     def _show_album_songs(self, album: dict):
+        """Show songs for an album in the virtualised ListView (no separate details view)."""
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
         if not songs:
             return
         album_name = album.get("album", UNKNOWN_ALBUM)
         self._title_label.set_label(f"{album_name}")
-        clear_container(self._songs_list)
-        for s in songs:
-            r = self._build_song_row(s)
-            self._songs_list.append(r)
-        self._stack.set_visible_child_name("songs")
+
         self._all_songs = songs
+        objects = [SongObject(s) for s in songs]
+        self._songs_store.splice(0, self._songs_store.get_n_items(), objects)
+
+        self._stack.set_visible_child_name("songs")
 
     def _show_album_details(self, album: dict):
         songs = self.db.get_songs_by_album(album["album"], album.get("album_artist", ""))
@@ -198,12 +200,12 @@ class LibraryAlbumDetailsMixin:
             if hasattr(self, "_back_btn"):
                 self._back_btn.set_visible(True)
             self._title_label.set_label(artist_name)
-            clear_container(self._songs_list)
-            for s in songs:
-                r = self._build_song_row(s)
-                self._songs_list.append(r)
-            self._stack.set_visible_child_name("songs")
+
             self._all_songs = songs
+            objects = [SongObject(s) for s in songs]
+            self._songs_store.splice(0, self._songs_store.get_n_items(), objects)
+
+            self._stack.set_visible_child_name("songs")
 
     def _on_genre_selected(self, genre: str):
         songs = self.db.get_songs_by_genre(genre)
@@ -212,9 +214,9 @@ class LibraryAlbumDetailsMixin:
             if hasattr(self, "_back_btn"):
                 self._back_btn.set_visible(True)
             self._title_label.set_label(genre)
-            clear_container(self._songs_list)
-            for s in songs:
-                r = self._build_song_row(s)
-                self._songs_list.append(r)
-            self._stack.set_visible_child_name("songs")
+
             self._all_songs = songs
+            objects = [SongObject(s) for s in songs]
+            self._songs_store.splice(0, self._songs_store.get_n_items(), objects)
+
+            self._stack.set_visible_child_name("songs")

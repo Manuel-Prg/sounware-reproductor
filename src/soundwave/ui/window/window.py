@@ -260,7 +260,8 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
                 if not row:
                     break
                 if getattr(row, "_view_id", "") == target_view:
-                    self._sidebar_list.select_row(row)
+                    if self._sidebar_list.get_mapped():
+                        self._sidebar_list.select_row(row)
                     self._on_sidebar_row_activated(self._sidebar_list, row)
                     break
                 idx += 1
@@ -310,7 +311,8 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
                 if not row:
                     break
                 if getattr(row, "_view_id", "") == target_view:
-                    self._sidebar_list.select_row(row)
+                    if self._sidebar_list.get_mapped():
+                        self._sidebar_list.select_row(row)
                     self._on_sidebar_row_activated(self._sidebar_list, row)
                     break
                 idx += 1

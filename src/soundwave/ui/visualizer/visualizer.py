@@ -66,17 +66,36 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         bg_click_gesture = Gtk.GestureClick()
         bg_click_gesture.connect("pressed", self._on_bg_clicked)
 
+        # Blurred background picture and dimmer overlay layer
+        self._bg_picture = Gtk.Picture()
+        self._bg_picture.set_can_shrink(True)
+        self._bg_picture.set_content_fit(Gtk.ContentFit.COVER)
+        self._bg_picture.set_hexpand(True)
+        self._bg_picture.set_vexpand(True)
+        self._bg_picture.add_css_class("visualizer-bg-image")
+
+        self._bg_dimmer = Gtk.Box()
+        self._bg_dimmer.set_hexpand(True)
+        self._bg_dimmer.set_vexpand(True)
+        self._bg_dimmer.add_css_class("visualizer-bg-dimmer")
+
+        self._bg_overlay = Gtk.Overlay()
+        self._bg_overlay.add_css_class("visualizer-bg")
+        self._bg_overlay.set_child(self._bg_picture)
+        self._bg_overlay.add_overlay(self._bg_dimmer)
+
         if CAIRO_SUPPORTED:
             self._drawing_area = Gtk.DrawingArea()
             self._drawing_area.set_draw_func(self._draw_callback, None)
             self._drawing_area.add_controller(bg_click_gesture)
-            self.set_child(self._drawing_area)
+            self._bg_overlay.add_overlay(self._drawing_area)
+            self.set_child(self._bg_overlay)
             self._update_theme_colors()
         else:
             # pyrefly: ignore [bad-assignment]
             self._drawing_area = None
             bg_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            bg_box.set_css_classes(["visualizer-bg", "visualizer-fallback-bg"])
+            bg_box.set_css_classes(["visualizer-fallback-bg"])
             bg_box.set_vexpand(True)
             bg_box.set_hexpand(True)
             bg_box.add_controller(bg_click_gesture)
@@ -105,7 +124,8 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
                 self._bar_widgets.append(bar_fill)
                 
             bg_box.append(self._bars_container)
-            self.set_child(bg_box)
+            self._bg_overlay.add_overlay(bg_box)
+            self.set_child(self._bg_overlay)
             self._update_theme_colors()
 
         overlay_scroll = Gtk.ScrolledWindow()
@@ -296,6 +316,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             self._artist_label.set_text("")
             self._audio_info_label.set_text("")
             self._art_picture.set_paintable(None)
+            self._bg_picture.set_paintable(None)
             self._bg_color = (0.05, 0.05, 0.05)
             self._accent_color = (0.11, 0.73, 0.33)
             self._fg_color = (0.8, 0.8, 0.8)
@@ -316,6 +337,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         art_path = get_art_path(song.id, self.db) if song.id is not None else None
         if art_path and art_path.exists():
             self._art_picture.set_filename(str(art_path))
+            self._bg_picture.set_filename(str(art_path))
             try:
                 bg_hex, accent_hex, fg_hex = get_theme_colors_from_art(art_path)
                 self._bg_color = hex_to_rgb(bg_hex)
@@ -325,6 +347,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
                 pass
         else:
             self._art_picture.set_paintable(None)
+            self._bg_picture.set_paintable(None)
             self._bg_color = (0.05, 0.05, 0.05)
             self._accent_color = (0.11, 0.73, 0.33)
             self._fg_color = (0.8, 0.8, 0.8)
@@ -394,11 +417,6 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             self._update_fallback_bars()
 
     def _draw_callback(self, area, cr, width, height, user_data):
-        # 1. Base dark background (very dark neutral tone, e.g. #040405)
-        cr.rectangle(0, 0, width, height)
-        cr.set_source_rgb(0.04, 0.04, 0.05)
-        cr.fill()
-
         # Extract colors
         bg_r, bg_g, bg_b = self._bg_color
         ac_r, ac_g, ac_b = self._accent_color

@@ -1,40 +1,103 @@
+"""LibraryView — vista principal de la biblioteca musical.
+
+Este archivo es intencionalmente pequeño (~160 líneas).
+Toda la lógica de cada sección vive en mixins especializados:
+
+  library_songs_view.py   → ListView virtualizado de canciones + búsqueda
+  library_queue_view.py   → Vista y lógica de cola de reproducción
+  library_populate.py     → Población de álbumes, artistas, géneros, canciones
+  library_smart_view.py   → Listas inteligentes
+  library_grid_views.py   → Scaffolds de álbumes/artistas/géneros/visualizador
+  library_cards.py        → Tarjetas de álbum y artista
+  library_playlists.py    → Playlists de usuario
+  library_menus.py        → Menús contextuales de canción
+  library_sorting.py      → Ordenamiento
+  library_album_details.py→ Vista de detalle de álbum
+"""
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio, GObject
+from gi.repository import Gtk, Adw, GLib
 
-from pathlib import Path
 from typing import Optional, Callable
 
-from soundwave.library.database.database import Database, Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
-from soundwave.library.metadata.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
-from soundwave.player.engine import Player, PlayerState
-from soundwave.ui.components.utils import clear_container
+from soundwave.library.database.database import Database, Song
+from soundwave.player.engine import Player
+from soundwave.ui.library.library_songs_view import LibrarySongsViewMixin
+from soundwave.ui.library.library_queue_view import LibraryQueueViewMixin
+from soundwave.ui.library.library_populate import LibraryPopulateMixin
+from soundwave.ui.library.library_smart_view import LibrarySmartViewMixin
+from soundwave.ui.library.library_grid_views import LibraryGridViewsMixin
 from soundwave.ui.library.library_cards import LibraryCardsMixin
 from soundwave.ui.library.library_playlists import LibraryPlaylistsMixin
 from soundwave.ui.library.library_menus import LibraryMenusMixin
 from soundwave.ui.library.library_sorting import LibrarySortingMixin
 from soundwave.ui.library.library_album_details import LibraryAlbumDetailsMixin
-
+from soundwave.ui.library.song_object import SongObject
 
 PlaySongCallback = Callable[[Song, list[Song]], None]
 QueueSongCallback = Callable[[Song], None]
 
 
-class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenusMixin, LibrarySortingMixin, LibraryAlbumDetailsMixin):
+class LibraryView(
+    Gtk.Box,
+    LibrarySongsViewMixin,
+    LibraryQueueViewMixin,
+    LibraryPopulateMixin,
+    LibrarySmartViewMixin,
+    LibraryGridViewsMixin,
+    LibraryCardsMixin,
+    LibraryPlaylistsMixin,
+    LibraryMenusMixin,
+    LibrarySortingMixin,
+    LibraryAlbumDetailsMixin,
+):
     def __init__(self, db: Database, player: Player):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.db = db
         self.player = player
         self.player.connect_queue(self._on_player_queue_changed)
+
         self._play_song_cbs: list[PlaySongCallback] = []
         self._queue_song_cbs: list[QueueSongCallback] = []
         self._current_song_id: Optional[int] = None
         self._all_songs: list[Song] = []
-        self._current_view_id: str = "songs"
+        self._current_view_id: str = "all"
 
+        # Sorting state
+        self._song_sort_criteria = "title"
+        self._song_sort_order = "asc"
+        self._album_sort_criteria = "album"
+        self._album_sort_order = "asc"
+        self._current_playlist_id = None
+        self._dragged_row = None
+        self._playlist_pos_cache: dict = {}
+        self._playlist_pos_cache_id = None
+
+        # Album view mode
+        from soundwave.library.config.config import load_settings
+        settings = load_settings()
+        self._album_view_mode = settings.get("album_view_mode", "circle")
+
+        self._build_header()
+        self._build_stack()
+
+        # Which views need a (re)populate on next access.
+        # Queue is exempt — it is always fresh from player state.
+        self._views_dirty: set[str] = {
+            "all", "albums", "artists", "genres", "smart", "playlists"
+        }
+
+        # Defer initial song load so the window can appear first
+        GLib.idle_add(self._initial_load)
+
+    # ── Header ────────────────────────────────────────────────────────────
+
+    def _build_header(self):
         self._header = Adw.HeaderBar()
         self._header.add_css_class("green-deck-header")
+
         self._title_label = Gtk.Label(label="Todas las canciones")
         self._title_label.set_css_classes(["title"])
         self._header.set_title_widget(self._title_label)
@@ -56,27 +119,12 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self.search_entry.set_size_request(240, -1)
         self._header.pack_end(self.search_entry)
 
-        # Sorting Options
-        self._song_sort_criteria = "title"
-        self._song_sort_order = "asc"
-        self._album_sort_criteria = "album"
-        self._album_sort_order = "asc"
-        self._current_playlist_id = None
-        self._dragged_row = None
-        self._playlist_pos_cache = {}
-        self._playlist_pos_cache_id = None
-
         self._sort_btn = Gtk.MenuButton()
         self._sort_btn.set_icon_name("view-sort-ascending-symbolic")
         self._sort_btn.set_tooltip_text("Ordenar")
         self._sort_popover = Gtk.Popover()
         self._sort_btn.set_popover(self._sort_popover)
         self._header.pack_end(self._sort_btn)
-
-        # Album view mode setting and button
-        from soundwave.library.config.config import load_settings
-        settings = load_settings()
-        self._album_view_mode = settings.get("album_view_mode", "circle")
 
         self._album_view_mode_btn = Gtk.MenuButton()
         self._album_view_mode_btn.set_icon_name("view-grid-symbolic")
@@ -88,6 +136,9 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
 
         self.append(self._header)
 
+    # ── Main stack ────────────────────────────────────────────────────────
+
+    def _build_stack(self):
         self._stack = Gtk.Stack()
         self._stack.set_vexpand(True)
         self._stack.set_hexpand(True)
@@ -99,7 +150,7 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._toast_overlay.set_hexpand(True)
         self.append(self._toast_overlay)
 
-        # Views
+        # Build all view scaffolds (no data yet)
         self._build_songs_view()
         self._build_queue_view()
         self._build_albums_view()
@@ -114,324 +165,61 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         self._stack.set_visible_child_name("songs")
         self._update_sort_popover_content()
 
+    # ── Public API ────────────────────────────────────────────────────────
 
+    def connect_play_song(self, cb: PlaySongCallback):
+        self._play_song_cbs.append(cb)
 
-    PRESET_RULES = [
-        ("Recién Añadido", "Canciones agregadas recientemente", "list-add-symbolic", {"recent": True}),
-        ("Favoritos", "Canciones con mejor valoración", "emblem-favorite-symbolic", {"rating_min": 4}),
-        ("Más Escuchadas", "Canciones con más reproducciones", "emblem-important-symbolic", {"most_played": True}),
-    ]
+    def connect_queue_song(self, cb: QueueSongCallback):
+        self._queue_song_cbs.append(cb)
 
-    def _build_songs_view(self):
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-
-        self._songs_list = Gtk.ListBox()
-        self._songs_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._songs_list.set_css_classes(["songs-list"])
-        self._songs_list.connect("row-activated", self._on_song_activated)
-        scrolled.set_child(self._songs_list)
-        self._stack.add_named(scrolled, "songs")
-
-    def _build_albums_view(self):
-        self._albums_main_stack = Gtk.Stack()
-        self._albums_main_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-
-        # FlowBox view (circle/grid)
-        scrolled_flow = Gtk.ScrolledWindow()
-        scrolled_flow.set_vexpand(True)
-        scrolled_flow.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._albums_flow = Gtk.FlowBox()
-        self._albums_flow.set_max_children_per_line(6)
-        self._albums_flow.set_min_children_per_line(2)
-        self._albums_flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._albums_flow.set_css_classes(["album-grid"])
-        self._albums_flow.set_homogeneous(True)
-        self._albums_flow.set_column_spacing(16)
-        self._albums_flow.set_row_spacing(16)
-        self._albums_flow.set_halign(Gtk.Align.FILL)
-        self._albums_flow.set_valign(Gtk.Align.START)
-        scrolled_flow.set_child(self._albums_flow)
-
-        # ListBox view (list)
-        scrolled_list = Gtk.ScrolledWindow()
-        scrolled_list.set_vexpand(True)
-        scrolled_list.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._albums_list = Gtk.ListBox()
-        self._albums_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._albums_list.set_css_classes(["songs-list"])
-        scrolled_list.set_child(self._albums_list)
-
-        self._albums_main_stack.add_named(scrolled_flow, "grid")
-        self._albums_main_stack.add_named(scrolled_list, "list")
-
-        self._stack.add_named(self._albums_main_stack, "albums")
-
-    def _build_artists_view(self):
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._artists_flow = Gtk.FlowBox()
-        self._artists_flow.set_max_children_per_line(6)
-        self._artists_flow.set_min_children_per_line(2)
-        self._artists_flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._artists_flow.set_css_classes(["artist-grid"])
-        self._artists_flow.set_homogeneous(True)
-        self._artists_flow.set_column_spacing(16)
-        self._artists_flow.set_row_spacing(16)
-        self._artists_flow.set_halign(Gtk.Align.FILL)
-        self._artists_flow.set_valign(Gtk.Align.START)
-        scrolled.set_child(self._artists_flow)
-        self._stack.add_named(scrolled, "artists")
-
-    def _build_genres_view(self):
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-
-        self._genres_flow = Gtk.FlowBox()
-        self._genres_flow.set_max_children_per_line(8)
-        self._genres_flow.set_min_children_per_line(3)
-        self._genres_flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._genres_flow.set_homogeneous(True)
-        self._genres_flow.set_column_spacing(12)
-        self._genres_flow.set_row_spacing(12)
-        self._genres_flow.set_halign(Gtk.Align.FILL)
-        self._genres_flow.set_valign(Gtk.Align.START)
-        self._genres_flow.add_css_class("genres-grid")
-        scrolled.set_child(self._genres_flow)
-        self._stack.add_named(scrolled, "genres")
-
-    def _build_search_view(self):
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-
-        self._search_list = Gtk.ListBox()
-        self._search_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._search_list.set_css_classes(["songs-list"])
-        self._search_list.connect("row-activated", self._on_song_activated)
-        scrolled.set_child(self._search_list)
-        self._stack.add_named(scrolled, "search")
-
-    def _build_smart_view(self):
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._smart_flow = Gtk.FlowBox()
-        self._smart_flow.set_max_children_per_line(6)
-        self._smart_flow.set_min_children_per_line(2)
-        self._smart_flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._smart_flow.set_homogeneous(True)
-        self._smart_flow.set_column_spacing(16)
-        self._smart_flow.set_row_spacing(16)
-        self._smart_flow.set_halign(Gtk.Align.FILL)
-        self._smart_flow.set_valign(Gtk.Align.START)
-        self._smart_flow.add_css_class("smart-grid")
-        scrolled.set_child(self._smart_flow)
-        self._stack.add_named(scrolled, "smart")
-
-    def _build_visualizer_view(self):
-        # Defer visualizer creation until needed to improve startup time
-        self._visualizer_view = None
-        placeholder = Gtk.Label(label="Visualizador")
-        placeholder.set_halign(Gtk.Align.CENTER)
-        placeholder.set_valign(Gtk.Align.CENTER)
-        placeholder.add_css_class("dim-label")
-        self._stack.add_named(placeholder, "visualizer")
-
-    def _ensure_visualizer(self):
-        """Create visualizer on demand when first accessed"""
-        if self._visualizer_view is None:
-            from soundwave.ui.visualizer.visualizer import VisualizerView
-            self._visualizer_view = VisualizerView(self.db, self.player)
-            self._visualizer_view.connect_play_song(self._on_visualizer_play)
-            # Replace placeholder with actual visualizer
-            placeholder = self._stack.get_child_by_name("visualizer")
-            if placeholder:
-                self._stack.remove(placeholder)
-            self._stack.add_named(self._visualizer_view, "visualizer")
-
-    def _on_visualizer_play(self, song: Song, queue: list[Song]):
-        for cb in self._play_song_cbs:
-            cb(song, queue)
-
-    def _populate_smart(self):
-        clear_container(self._smart_flow)
-        for name, desc, icon, rules in self.PRESET_RULES:
-            # We use an overlay to place a hover play button over the card
-            overlay = Gtk.Overlay()
-            overlay.add_css_class("smart-card")
-            overlay.set_size_request(160, 200)
-
-            # Define a CSS-friendly class for the icon color container
-            import re
-            css_suffix = re.sub(
-                r'[^a-zA-Z0-9-]', '', 
-                name.lower().replace(" ", "-").replace("ñ", "n").replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-            )
-            
-            # Content box containing the icon and texts
-            card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            card_box.set_margin_start(12)
-            card_box.set_margin_end(12)
-            card_box.set_margin_top(12)
-            card_box.set_margin_bottom(12)
-            card_box.set_halign(Gtk.Align.FILL)
-            card_box.set_valign(Gtk.Align.FILL)
-
-            # Icon container (square with rounded borders, nicely padded, color background)
-            icon_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-            icon_container.add_css_class("smart-icon-container")
-            icon_container.add_css_class(f"smart-icon-{css_suffix}")
-            icon_container.set_halign(Gtk.Align.START)
-            icon_container.set_valign(Gtk.Align.START)
-            icon_container.set_size_request(56, 56)
-            
-            icon_w = Gtk.Image.new_from_icon_name(icon)
-            icon_w.set_pixel_size(24)
-            icon_w.set_halign(Gtk.Align.CENTER)
-            icon_w.set_valign(Gtk.Align.CENTER)
-            icon_w.set_hexpand(True)
-            icon_w.set_vexpand(True)
-            icon_container.append(icon_w)
-            
-            card_box.append(icon_container)
-
-            # Text container
-            text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            
-            title = Gtk.Label(label=name)
-            title.set_css_classes(["smart-card-title"])
-            title.set_max_width_chars(16)
-            title.set_wrap(True)
-            title.set_xalign(0)
-            title.set_halign(Gtk.Align.START)
-            text_box.append(title)
-
-            subtitle = Gtk.Label(label=desc)
-            subtitle.set_css_classes(["smart-card-subtitle"])
-            subtitle.set_max_width_chars(18)
-            subtitle.set_wrap(True)
-            subtitle.set_xalign(0)
-            subtitle.set_halign(Gtk.Align.START)
-            text_box.append(subtitle)
-            
-            card_box.append(text_box)
-            
-            overlay.set_child(card_box)
-
-            # Floating play button overlay (positioned at bottom right, visible on hover)
-            play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
-            play_btn.set_css_classes(["smart-play-btn", "circular"])
-            play_btn.set_halign(Gtk.Align.END)
-            play_btn.set_valign(Gtk.Align.END)
-            play_btn.set_size_request(40, 40)
-            play_btn.set_margin_end(12)
-            play_btn.set_margin_bottom(12)
-            play_rules = rules
-            play_btn.connect("clicked", lambda b, r=play_rules: self._on_smart_play(r))
-            overlay.add_overlay(play_btn)
-
-            # Make card clickable to show songs in detailed view
-            card_gesture = Gtk.GestureClick()
-            card_gesture.connect("pressed", lambda g, n, x, y, name=name, r=play_rules: self._show_smart_songs(name, r))
-            overlay.add_controller(card_gesture)
-
-            self._smart_flow.append(overlay)
-
-    def _show_smart_songs(self, name: str, rules: dict):
-        from soundwave.library.playlists.smart_playlist import evaluate_rules
-        songs = evaluate_rules(self.db, rules)
-        self._previous_view_id = self._current_view_id
-        if hasattr(self, "_back_btn"):
-            self._back_btn.set_visible(True)
-        self._title_label.set_label(name)
-        
-        self._current_playlist_id = None
-        self._all_songs = songs
-        self._sort_songs_list()
-        
-        clear_container(self._songs_list)
-        initial_batch = self._all_songs[:100]
-        for s in initial_batch:
-            r = self._build_song_row(s)
-            self._songs_list.append(r)
-        if len(self._all_songs) > 100:
-            GLib.idle_add(self._load_remaining_songs, 100)
-            
-        self._stack.set_visible_child_name("songs")
-        if hasattr(self, "_sort_btn"):
-            self._sort_btn.set_visible(True)
-            self._update_sort_popover_content()
-
-    def _on_smart_play(self, rules: dict):
-        from soundwave.library.playlists.smart_playlist import evaluate_rules
-        songs = evaluate_rules(self.db, rules)
-        if songs:
-            for cb in self._play_song_cbs:
-                cb(songs[0], songs)
-
-    def _on_back_clicked(self):
-        if hasattr(self, "_previous_view_id") and self._previous_view_id:
-            self.show_view(self._previous_view_id)
-
-    # --- Public API ---
     def show_view(self, view_id: str):
         if self._visualizer_view and view_id != "visualizer":
             self._visualizer_view.on_hide()
 
         self._current_view_id = view_id
-        if hasattr(self, "_back_btn"):
-            self._back_btn.set_visible(False)
-        if hasattr(self, "_create_playlist_btn"):
-            self._create_playlist_btn.set_visible(view_id == "playlists")
-
-        if hasattr(self, "_sort_btn"):
-            self._sort_btn.set_visible(view_id in ["all", "albums", "playlists", "smart"])
-
-        if hasattr(self, "_album_view_mode_btn"):
-            self._album_view_mode_btn.set_visible(view_id == "albums")
+        self._back_btn.set_visible(False)
+        self._create_playlist_btn.set_visible(view_id == "playlists")
+        self._sort_btn.set_visible(view_id in {"all", "albums", "playlists", "smart"})
+        self._album_view_mode_btn.set_visible(view_id == "albums")
 
         self._title_label.set_label({
-            "all": "Todas las canciones",
-            "queue": "Cola de reproducción",
-            "albums": "Álbumes",
-            "artists": "Artistas",
-            "genres": "Géneros",
-            "smart": "Listas Inteligentes",
+            "all":       "Todas las canciones",
+            "queue":     "Cola de reproducción",
+            "albums":    "Álbumes",
+            "artists":   "Artistas",
+            "genres":    "Géneros",
+            "smart":     "Listas Inteligentes",
             "playlists": "Listas de reproducción",
-            "visualizer": "Visualizador",
+            "visualizer":"Visualizador",
         }.get(view_id, "Soundwave"))
 
-        if view_id == "all":
-            self._populate_songs()
-            self._stack.set_visible_child_name("songs")
-        elif view_id == "queue":
+        # Queue is always live; everything else uses the dirty cache.
+        needs_populate = (view_id == "queue") or (view_id in self._views_dirty)
+
+        _populate_map = {
+            "all":       (self._populate_songs,    "songs"),
+            "albums":    (self._populate_albums,   "albums"),
+            "artists":   (self._populate_artists,  "artists"),
+            "genres":    (self._populate_genres,   "genres"),
+            "smart":     (self._populate_smart,    "smart"),
+            "playlists": (self._populate_playlists,"playlists"),
+        }
+
+        if view_id == "queue":
             self._populate_queue()
             self._stack.set_visible_child_name("queue")
-        elif view_id == "albums":
-            self._populate_albums()
-            self._stack.set_visible_child_name("albums")
-        elif view_id == "artists":
-            self._populate_artists()
-            self._stack.set_visible_child_name("artists")
-        elif view_id == "genres":
-            self._populate_genres()
-            self._stack.set_visible_child_name("genres")
-        elif view_id == "smart":
-            self._populate_smart()
-            self._stack.set_visible_child_name("smart")
-        elif view_id == "playlists":
-            self._populate_playlists()
-            self._stack.set_visible_child_name("playlists")
         elif view_id == "visualizer":
             self._ensure_visualizer()
             if self._visualizer_view:
                 self._visualizer_view.on_show()
             self._stack.set_visible_child_name("visualizer")
+        elif view_id in _populate_map:
+            populate_fn, stack_name = _populate_map[view_id]
+            if needs_populate:
+                populate_fn()
+                self._views_dirty.discard(view_id)
+            self._stack.set_visible_child_name(stack_name)
 
         self._update_sort_popover_content()
 
@@ -439,25 +227,34 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         if self._visualizer_view:
             self._visualizer_view.on_hide()
         self._title_label.set_label(f"Resultados: {len(results)}")
-        
         self._current_playlist_id = None
         self._all_songs = results
         self._sort_songs_list()
-        
-        clear_container(self._search_list)
-        for song in self._all_songs:
-            row = self._build_song_row(song)
-            self._search_list.append(row)
+
+        objects = [SongObject(song) for song in self._all_songs]
+        self._search_store.splice(0, self._search_store.get_n_items(), objects)
+
         self._stack.set_visible_child_name("search")
-        if hasattr(self, "_sort_btn"):
-            self._sort_btn.set_visible(True)
-            self._update_sort_popover_content()
+        self._sort_btn.set_visible(True)
+        self._update_sort_popover_content()
 
     def refresh(self):
-        self._all_songs = self.db.get_all_songs()
-        self._populate_songs()
-        if self._current_view_id == "playlists":
-            self._populate_playlists()
+        """Called after a library scan or file-watcher event.
+        Marks all static views dirty and immediately repopulates the current one.
+        """
+        self._views_dirty = {"all", "albums", "artists", "genres", "smart", "playlists"}
+        current = self._current_view_id
+        _refresh_map = {
+            "all":       self._populate_songs,
+            "albums":    self._populate_albums,
+            "artists":   self._populate_artists,
+            "genres":    self._populate_genres,
+            "smart":     self._populate_smart,
+            "playlists": self._populate_playlists,
+        }
+        if current in _refresh_map:
+            _refresh_map[current]()
+            self._views_dirty.discard(current)
 
     def highlight_song(self, song: Optional[Song]):
         self._current_song_id = song.id if song else None
@@ -466,453 +263,52 @@ class LibraryView(Gtk.Box, LibraryCardsMixin, LibraryPlaylistsMixin, LibraryMenu
         else:
             self._update_highlight()
 
-    # --- Populate views ---
-    def _populate_songs(self):
-        self._current_playlist_id = None
-        if getattr(self, "_song_sort_criteria", "title") == "playlist":
-            self._song_sort_criteria = "title"
-        clear_container(self._songs_list)
-        # Load songs in chunks to improve startup performance
-        self._all_songs = self.db.get_all_songs()
-        self._sort_songs_list()
-        # Load first 100 songs immediately, then load rest in background
-        initial_batch = self._all_songs[:100]
-        for song in initial_batch:
-            row = self._build_song_row(song)
-            self._songs_list.append(row)
-        # Load remaining songs in background
-        if len(self._all_songs) > 100:
-            GLib.idle_add(self._load_remaining_songs, 100)
+    # ── Internal ──────────────────────────────────────────────────────────
 
-    def _load_remaining_songs(self, start_index: int) -> bool:
-        """Load remaining songs in batches to avoid blocking UI"""
-        playlist_id = getattr(self, "_current_playlist_id", None)
-        batch_size = 50
-        end_index = min(start_index + batch_size, len(self._all_songs))
-        for i in range(start_index, end_index):
-            row = self._build_song_row(self._all_songs[i], playlist_id=playlist_id)
-            self._songs_list.append(row)
-        # Continue loading if there are more songs
-        if end_index < len(self._all_songs):
-            GLib.idle_add(self._load_remaining_songs, end_index)
-        return False  # Stop current invocation
+    def _initial_load(self) -> bool:
+        """Populate the songs view once the main loop is running."""
+        self._populate_songs()
+        self._views_dirty.discard("all")
+        return False
 
-    def _populate_albums(self):
-        self._update_album_view_mode_popover()
-
-        # Check current view mode and clear appropriate container
-        view_mode = getattr(self, "_album_view_mode", "circle")
-        if view_mode == "list":
-            self._albums_main_stack.set_visible_child_name("list")
-            clear_container(self._albums_list)
-        else:
-            self._albums_main_stack.set_visible_child_name("grid")
-            clear_container(self._albums_flow)
-
-        albums = self.db.get_albums()
-
-        # Sort albums
-        criteria = getattr(self, "_album_sort_criteria", "album")
-        order = getattr(self, "_album_sort_order", "asc")
-        descending = (order == "desc")
-
-        def sort_key(a: dict):
-            if criteria == "album":
-                return (a.get("album") or "").lower()
-            elif criteria == "song_count":
-                return a.get("song_count") or 0
-            elif criteria == "total_duration":
-                return a.get("total_duration") or 0.0
-            elif criteria == "year":
-                return a.get("year") or 0
-            elif criteria == "date":
-                return a.get("added_at") or 0.0
-            elif criteria == "artist":
-                return (a.get("artist") or "").lower()
-            elif criteria == "album_artist":
-                return (a.get("album_artist") or "").lower()
-            elif criteria == "composer":
-                return (a.get("composer") or "").lower()
-            return (a.get("album") or "").lower()
-
-        albums.sort(key=sort_key, reverse=descending)
-
-        # Load first 50 albums immediately, then load rest in background
-        initial_batch = albums[:50]
-        for album in initial_batch:
-            if view_mode == "list":
-                card = self._build_album_list_row(album)
-                self._albums_list.append(card)
-            else:
-                card = self._build_album_card(album)
-                self._albums_flow.append(card)
-        # Load remaining albums in background
-        if len(albums) > 50:
-            GLib.idle_add(self._load_remaining_albums, albums, 50)
-
-    def _load_remaining_albums(self, albums: list, start_index: int) -> bool:
-        """Load remaining albums in batches to avoid blocking UI"""
-        view_mode = getattr(self, "_album_view_mode", "circle")
-        batch_size = 25
-        end_index = min(start_index + batch_size, len(albums))
-        for i in range(start_index, end_index):
-            if view_mode == "list":
-                card = self._build_album_list_row(albums[i])
-                self._albums_list.append(card)
-            else:
-                card = self._build_album_card(albums[i])
-                self._albums_flow.append(card)
-        # Continue loading if there are more albums
-        if end_index < len(albums):
-            GLib.idle_add(self._load_remaining_albums, albums, end_index)
-        return False  # Stop current invocation
-
-    def _update_album_view_mode_popover(self):
-        if not hasattr(self, "_album_view_mode_popover"):
-            return
-        content = self._build_view_mode_popover_content()
-        self._album_view_mode_popover.set_child(content)
-
-    def _build_view_mode_popover_content(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
-
-        title_lbl = Gtk.Label(label="Modo de vista para álbum")
-        title_lbl.set_halign(Gtk.Align.START)
-        title_lbl.set_css_classes(["dim-label"])
-        title_lbl.set_margin_bottom(4)
-        box.append(title_lbl)
-
-        options = [
-            ("Vista en círculo", "circle"),
-            ("Vista en cuadrícula", "grid"),
-            ("Vista en lista", "list"),
-        ]
-
-        active_mode = getattr(self, "_album_view_mode", "circle")
-
-        def set_view_mode(mode):
-            from soundwave.library.config.config import save_setting
-            self._album_view_mode = mode
-            save_setting("album_view_mode", mode)
-            self._album_view_mode_popover.popdown()
-            self._populate_albums()
-
-        for label, mode in options:
-            btn = Gtk.Button()
-            btn.set_halign(Gtk.Align.FILL)
-            btn.set_css_classes(["flat"])
-
-            btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-
-            lbl = Gtk.Label(label=label)
-            lbl.set_xalign(0.0)
-            lbl.set_hexpand(True)
-            btn_box.append(lbl)
-
-            if mode == active_mode:
-                check_img = Gtk.Image.new_from_icon_name("object-select-symbolic")
-                check_img.set_pixel_size(12)
-                btn_box.append(check_img)
-                btn.add_css_class("suggested-action")
-
-            btn.set_child(btn_box)
-            btn.connect("clicked", lambda b, m=mode: set_view_mode(m))
-            box.append(btn)
-
-        return box
-
-    def _populate_artists(self):
-        clear_container(self._artists_flow)
-        artists = self.db.get_artists()
-        # Load first 50 artists immediately, then load rest in background
-        initial_batch = artists[:50]
-        for artist in initial_batch:
-            card = self._build_artist_card(artist)
-            self._artists_flow.append(card)
-        # Load remaining artists in background
-        if len(artists) > 50:
-            GLib.idle_add(self._load_remaining_artists, artists, 50)
-
-    def _load_remaining_artists(self, artists: list, start_index: int) -> bool:
-        """Load remaining artists in batches to avoid blocking UI"""
-        batch_size = 25
-        end_index = min(start_index + batch_size, len(artists))
-        for i in range(start_index, end_index):
-            card = self._build_artist_card(artists[i])
-            self._artists_flow.append(card)
-        # Continue loading if there are more artists
-        if end_index < len(artists):
-            GLib.idle_add(self._load_remaining_artists, artists, end_index)
-        return False  # Stop current invocation
-
-    def _populate_genres(self):
-        clear_container(self._genres_flow)
-        genres = self.db.conn.execute("""
-            SELECT 
-                CASE WHEN genre = '' OR genre IS NULL THEN 'Sin género' ELSE genre END as genre,
-                COUNT(*) as count 
-            FROM songs 
-            GROUP BY 
-                CASE WHEN genre = '' OR genre IS NULL THEN 'Sin género' ELSE genre END 
-            ORDER BY genre
-        """).fetchall()
-        for g in genres:
-            card = self._build_genre_card(g)
-            self._genres_flow.append(card)
-
-    # --- Widget builders ---
-    def _on_song_activated(self, listbox, row):
-        song = getattr(row, "_song", None)
-        if song is None and hasattr(row, "get_child"):
-            c = row.get_child()
-            if c:
-                song = getattr(c, "_song", None)
-        if song is None:
-            return
-        parent_listbox = listbox
-        queue = []
-        child = parent_listbox.get_first_child()
-        while child:
-            s = getattr(child, "_song", None)
-            if s is None and hasattr(child, "get_child"):
-                c = child.get_child()
-                if c:
-                    s = getattr(c, "_song", None)
-            if s:
-                queue.append(s)
-            child = child.get_next_sibling()
-        if not queue:
-            queue = self._all_songs
-
-        for cb in self._play_song_cbs:
-            cb(song, queue)
-
-
+    def _on_back_clicked(self):
+        if hasattr(self, "_previous_view_id") and self._previous_view_id:
+            self.show_view(self._previous_view_id)
 
     def _update_highlight(self):
-        lists_to_check = [self._songs_list, self._search_list]
-        if hasattr(self, "_album_details_list"):
-            lists_to_check.append(self._album_details_list)
-        for listbox in lists_to_check:
-            child = listbox.get_first_child()
-            while child:
-                song = getattr(child, "_song", None)
-                if song and song.id == self._current_song_id:
-                    listbox.select_row(child)
+        # Virtualised ListViews
+        for store, sel in (
+            (self._songs_store,  self._songs_selection),
+            (self._search_store, self._search_selection),
+        ):
+            for i in range(store.get_n_items()):
+                obj = store.get_item(i)
+                if obj and obj.song.id == self._current_song_id:
+                    sel.set_selected(i)
                     break
-                child = child.get_next_sibling()
-
-        if hasattr(self, "_queue_list") and self._queue_list:
-            curr_idx = self.player.get_current_index()
-            child = self._queue_list.get_first_child()
-            while child:
-                if child.get_index() == curr_idx:
-                    self._queue_list.select_row(child)
-                    break
-                child = child.get_next_sibling()
-
-    # --- Callbacks ---
-    def connect_play_song(self, cb: PlaySongCallback):
-        self._play_song_cbs.append(cb)
-
-    def connect_queue_song(self, cb: QueueSongCallback):
-        self._queue_song_cbs.append(cb)
-
-    # --- Queue management UI ---
-    def _build_queue_view(self):
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        main_box.set_margin_start(16)
-        main_box.set_margin_end(16)
-        main_box.set_margin_top(16)
-        main_box.set_margin_bottom(16)
-
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        toolbar.append(spacer)
-
-        self._clear_queue_btn = Gtk.Button()
-        self._clear_queue_btn.set_css_classes(["destructive-action"])
-        self._clear_queue_btn.set_label("Limpiar cola")
-        self._clear_queue_btn.connect("clicked", lambda b: self._on_clear_queue_clicked())
-        toolbar.append(self._clear_queue_btn)
-        
-        main_box.append(toolbar)
-
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        
-        self._queue_list = Gtk.ListBox()
-        self._queue_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self._queue_list.set_css_classes(["songs-list"])
-        self._queue_list.connect("row-activated", self._on_queue_row_activated)
-        scrolled.set_child(self._queue_list)
-        
-        main_box.append(scrolled)
-        self._stack.add_named(main_box, "queue")
-
-    def _on_queue_row_activated(self, listbox, row):
-        idx = row.get_index()
-        if idx != -1:
-            s = getattr(row, "_song", None)
-            if s:
-                self.player.play_index(idx)
-
-    def _on_clear_queue_clicked(self):
-        self.player.clear_queue()
-
-    def _on_player_queue_changed(self, queue):
-        if self._current_view_id == "queue":
-            GLib.idle_add(self._populate_queue)
-
-    def _populate_queue(self):
-        clear_container(self._queue_list)
-        queue = self.player.get_queue()
-        curr_idx = self.player.get_current_index()
-        
-        if hasattr(self, "_clear_queue_btn"):
-            self._clear_queue_btn.set_sensitive(len(queue) > 0)
-
-        if not queue:
-            placeholder_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            placeholder_box.set_halign(Gtk.Align.CENTER)
-            placeholder_box.set_valign(Gtk.Align.CENTER)
-            placeholder_box.set_vexpand(True)
-            placeholder_box.set_margin_top(48)
-            
-            icon = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
-            icon.set_pixel_size(48)
-            icon.add_css_class("dim-label")
-            placeholder_box.append(icon)
-            
-            label = Gtk.Label(label="La cola de reproducción está vacía")
-            label.add_css_class("dim-label")
-            label.set_css_classes(["title-4"])
-            placeholder_box.append(label)
-            
-            row = Gtk.ListBoxRow()
-            row.set_child(placeholder_box)
-            row.set_selectable(False)
-            row.set_activatable(False)
-            self._queue_list.append(row)
-            return
-
-        for idx, song in enumerate(queue):
-            is_current = (idx == curr_idx)
-            row = self._build_queue_row(song, is_current=is_current)
-            self._queue_list.append(row)
-
-    def _build_queue_row(self, song: Song, is_current: bool = False) -> Adw.ActionRow:
-        row = Adw.ActionRow()
-        row.set_activatable(True)
-        row.set_title(GLib.markup_escape_text(song.display_title))
-        row.set_subtitle(GLib.markup_escape_text(f"{song.display_artist} · {song.display_album}"))
-        row._song = song
-
-        if is_current:
-            row.add_css_class("now-playing-row")
-            play_icon = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
-            play_icon.set_valign(Gtk.Align.CENTER)
-            row.add_prefix(play_icon)
-        else:
-            handle_img = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
-            handle_img.set_valign(Gtk.Align.CENTER)
-            handle_img.add_css_class("dim-label")
-            row.add_prefix(handle_img)
-            
-            drag_source = Gtk.DragSource.new()
-            drag_source.set_actions(Gdk.DragAction.MOVE)
-            
-            def on_drag_prepare(source, x, y, r=row):
-                self._dragged_row = r
-                return Gdk.ContentProvider.new_for_value("row")
-            drag_source.connect("prepare", on_drag_prepare)
-            
-            def on_drag_cancel(source, drag, reason):
-                self._dragged_row = None
-                return False
-            drag_source.connect("drag-cancel", on_drag_cancel)
-            
-            handle_img.add_controller(drag_source)
-            
-            drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
-            
-            def on_enter(target, x, y, target_row=row):
-                dragged_row = getattr(self, "_dragged_row", None)
-                if dragged_row and dragged_row != target_row:
-                    listbox = target_row.get_parent()
-                    if listbox:
-                        target_idx = target_row.get_index()
-                        listbox.remove(dragged_row)
-                        listbox.insert(dragged_row, target_idx)
-                return Gdk.DragAction.MOVE
-            drop_target.connect("enter", on_enter)
-            
-            def on_drop(target, value, x, y, target_row=row):
-                listbox = target_row.get_parent()
-                if listbox:
-                    songs = []
-                    child = listbox.get_first_child()
-                    while child:
-                        s = getattr(child, "_song", None)
-                        if s:
-                            songs.append(s)
-                        child = child.get_next_sibling()
-                    
-                    self.player.reorder_queue(songs)
-                    self._dragged_row = None
-                    return True
-                return False
-            drop_target.connect("drop", on_drop)
-            row.add_controller(drop_target)
-
-        fav_btn = Gtk.Button.new_from_icon_name("emblem-favorite-symbolic")
-        fav_btn.set_valign(Gtk.Align.CENTER)
-        fav_btn.set_css_classes(["flat", "circular"])
-        
-        if song.rating >= 4:
-            fav_btn.add_css_class("song-fav-active")
-        else:
-            fav_btn.add_css_class("song-fav-inactive")
-            
-        def on_fav_clicked(btn, s=song):
-            if s.rating >= 4:
-                self.db.update_rating(s.id, 0)
-                s.rating = 0
-                btn.remove_css_class("song-fav-active")
-                btn.add_css_class("song-fav-inactive")
             else:
-                self.db.update_rating(s.id, 5)
-                s.rating = 5
-                btn.remove_css_class("song-fav-inactive")
-                btn.add_css_class("song-fav-active")
-                
-        fav_btn.connect("clicked", on_fav_clicked)
-        row.add_suffix(fav_btn)
+                sel.set_selected(Gtk.INVALID_LIST_POSITION)
 
-        menu_btn = Gtk.Button.new_from_icon_name("view-more-symbolic")
-        menu_btn.set_valign(Gtk.Align.CENTER)
-        menu_btn.set_css_classes(["flat", "circular"])
-        menu_btn.set_tooltip_text("Más opciones")
-        menu_btn.connect("clicked", lambda b, s=song: self._show_song_menu(b, s))
-        row.add_suffix(menu_btn)
+        # Legacy ListBox in album details
+        if hasattr(self, "_album_details_list") and self._album_details_list:
+            if self._album_details_list.get_mapped():
+                child = self._album_details_list.get_first_child()
+                while child:
+                    if isinstance(child, Gtk.ListBoxRow) and child.get_parent() == self._album_details_list:
+                        if getattr(child, "_song", None) and child._song.id == self._current_song_id:
+                            self._album_details_list.select_row(child)
+                            break
+                    child = child.get_next_sibling()
 
-        remove_btn = Gtk.Button.new_from_icon_name("list-remove-symbolic")
-        remove_btn.set_valign(Gtk.Align.CENTER)
-        remove_btn.set_css_classes(["flat", "circular"])
-        remove_btn.set_tooltip_text("Quitar de la cola")
-        
-        def on_remove_clicked(btn, r=row):
-            idx = r.get_index()
-            if idx != -1:
-                self.player.remove_from_queue(idx)
-                
-        remove_btn.connect("clicked", on_remove_clicked)
-        row.add_suffix(remove_btn)
-
-        return row
-
+        # Queue ListBox
+        if hasattr(self, "_queue_list") and self._queue_list:
+            if self._queue_list.get_mapped():
+                curr_idx = self.player.get_current_index()
+                child = self._queue_list.get_first_child()
+                while child:
+                    if isinstance(child, Gtk.ListBoxRow) and child.get_parent() == self._queue_list:
+                        # Only try to match index if it's a valid song row (not placeholder which has index but no song)
+                        if getattr(child, "_song", None) and child.get_index() == curr_idx:
+                            self._queue_list.select_row(child)
+                            break
+                    child = child.get_next_sibling()

@@ -105,6 +105,10 @@ class WindowLibraryScanMixin:
             dialog.connect("response", on_response)
             dialog.show()
 
+    # ─── Scan progress tracking ────────────────────────────────────────────
+    _scan_background: bool = False   # True when the scan dialog was dismissed
+    _scan_dialog = None
+
     def _start_scan(self, directory: Path):
         from soundwave.library.config.config import load_settings, save_setting
         settings = load_settings()
@@ -117,12 +121,15 @@ class WindowLibraryScanMixin:
             dirs.append(dir_str)
             save_setting("music_directories", dirs)
 
+        self._scan_background = False
         self._scan_dialog = Adw.AlertDialog(
             heading="Escaneando...",
             body="Buscando archivos de música...",
         )
+        self._scan_dialog.add_response("background", "Escanear en segundo plano")
         self._scan_dialog.add_response("cancel", "Cancelar")
-        self._scan_dialog.connect("response", lambda d, r: self.scanner.cancel())
+        self._scan_dialog.set_response_appearance("background", Adw.ResponseAppearance.SUGGESTED)
+        self._scan_dialog.connect("response", self._on_scan_dialog_response)
         self._scan_dialog.present(self)
 
         def scan_task():
@@ -142,10 +149,24 @@ class WindowLibraryScanMixin:
         thread = threading.Thread(target=scan_task, daemon=True)
         thread.start()
 
-    def _update_scan_progress(self, done: int, total: int, msg: str):
-        if done < total and self._scan_dialog:
+    def _on_scan_dialog_response(self, dialog, response):
+        if response == "background":
+            # User wants to navigate freely — dismiss dialog, keep scanning
+            self._scan_background = True
             try:
-                self._scan_dialog.set_body(f"{done}/{total} - {msg}")
+                dialog.close()
+            except Exception:
+                pass
+            self._scan_dialog = None
+            self.add_toast("Escaneando en segundo plano…")
+        elif response == "cancel":
+            self.scanner.cancel()
+            self._scan_dialog = None
+
+    def _update_scan_progress(self, done: int, total: int, msg: str):
+        if self._scan_dialog and not self._scan_background:
+            try:
+                self._scan_dialog.set_body(f"{done}/{total} — {msg}")
             except Exception:
                 pass
         return False
@@ -157,11 +178,14 @@ class WindowLibraryScanMixin:
                 self._scan_dialog = None
             except Exception:
                 pass
-        toast = Adw.Toast.new(f"Escaneo completo: {added} canciones añadidas")
-        toast.set_timeout(3)
+        self._scan_background = False
         self._refresh_library()
         self._show_stats_notification(added)
         self._start_folder_watcher()
+        # Always show a toast so the user gets feedback even in background mode
+        toast = Adw.Toast.new(f"Escaneo completo: {added} canciones añadidas")
+        toast.set_timeout(4)
+        self._player_bar.add_toast(toast)
 
     def _on_scan_error(self, error_msg: str):
         if self._scan_dialog:
@@ -170,8 +194,10 @@ class WindowLibraryScanMixin:
                 self._scan_dialog = None
             except Exception:
                 pass
+        self._scan_background = False
         toast = Adw.Toast.new(f"Error al escanear: {error_msg}")
         toast.set_timeout(5)
+        self._player_bar.add_toast(toast)
 
     def _show_stats_notification(self, added: int):
         stats = self.db.get_stats()
@@ -179,6 +205,8 @@ class WindowLibraryScanMixin:
         toast = Adw.Toast.new(msg)
         toast.set_timeout(3)
         self._player_bar.add_toast(toast)
+
+    # ─── Re-scan ───────────────────────────────────────────────────────────
 
     def _start_rescan(self):
         from soundwave.library.config.config import load_settings
@@ -197,12 +225,15 @@ class WindowLibraryScanMixin:
             self._player_bar.add_toast(toast)
             return
 
+        self._scan_background = False
         self._scan_dialog = Adw.AlertDialog(
             heading="Re-escaneando biblioteca...",
             body="Buscando cambios en tus carpetas de música...",
         )
+        self._scan_dialog.add_response("background", "Escanear en segundo plano")
         self._scan_dialog.add_response("cancel", "Cancelar")
-        self._scan_dialog.connect("response", lambda d, r: self.scanner.cancel())
+        self._scan_dialog.set_response_appearance("background", Adw.ResponseAppearance.SUGGESTED)
+        self._scan_dialog.connect("response", self._on_scan_dialog_response)
         self._scan_dialog.present(self)
 
         def scan_task():
@@ -230,15 +261,15 @@ class WindowLibraryScanMixin:
                 self._scan_dialog = None
             except Exception:
                 pass
-        
+        self._scan_background = False
+
         msg = f"Re-escaneo completo: {added} añadidas/actualizadas"
         if removed > 0:
             msg += f", {removed} eliminadas"
         toast = Adw.Toast.new(msg)
         toast.set_timeout(4)
         self._player_bar.add_toast(toast)
-        
+
         self._refresh_library()
         self._show_stats_notification(added)
         self._start_folder_watcher()
-

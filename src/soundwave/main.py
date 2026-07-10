@@ -4,7 +4,7 @@ from pathlib import Path
 # Temporarily override XDG_CONFIG_HOME during GTK initialization to bypass
 # global custom GTK themes (like Orchis-Grey-Dark) that override Adwaita and block light/dark switching.
 original_xdg_config = os.environ.get("XDG_CONFIG_HOME")
-os.environ["XDG_CONFIG_HOME"] = "/nonexistent_dummy_path"
+os.environ["XDG_CONFIG_HOME"] = "/tmp/soundwave_dummy_xdg_config"
 
 import gi
 gi.require_version("cairo", "1.0")
@@ -58,7 +58,7 @@ from soundwave.core.plugin_manager import PluginManager
 
 # Re-override XDG_CONFIG_HOME to a dummy path for the rest of the application lifetime
 # so GTK never loads the custom gtk.css stylesheet during window realization or theme reloads.
-os.environ["XDG_CONFIG_HOME"] = "/nonexistent_dummy_path"
+os.environ["XDG_CONFIG_HOME"] = "/tmp/soundwave_dummy_xdg_config"
 
 
 APP_ID = "io.github.manuelprz.Soundwave"

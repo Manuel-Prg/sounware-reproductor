@@ -2,6 +2,7 @@ import sqlite3
 import json
 import os
 import time
+import threading
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -76,6 +77,22 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._init_tables()
+        self._lock = threading.RLock()
+        self._wrap_public_methods()
+
+    def _wrap_public_methods(self):
+        import functools
+        import inspect
+        for attr_name, attr in inspect.getmembers(self, predicate=inspect.ismethod):
+            if attr_name.startswith("_") or attr_name == "close":
+                continue
+            def make_wrapper(method):
+                @functools.wraps(method)
+                def wrapper(*args, **kwargs):
+                    with self._lock:
+                        return method(*args, **kwargs)
+                return wrapper
+            setattr(self, attr_name, make_wrapper(attr))
 
     def _init_tables(self):
         self.conn.executescript("""

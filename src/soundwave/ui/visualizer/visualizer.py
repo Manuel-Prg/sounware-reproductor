@@ -339,10 +339,9 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             try:
                 self._art_picture.set_filename(str(art_path))
                 self._bg_picture.set_filename(str(art_path))
-                try:
-                    bg_hex, accent_hex, fg_hex = get_theme_colors_from_art(art_path)
-                    self._bg_color = hex_to_rgb(bg_hex)
-                    self._accent_color = hex_to_rgb(accent_hex)
+                bg_hex, accent_hex, fg_hex = get_theme_colors_from_art(art_path)
+                self._bg_color = hex_to_rgb(bg_hex)
+                self._accent_color = hex_to_rgb(accent_hex)
                 self._fg_color = hex_to_rgb(fg_hex)
             except Exception:
                 pass
@@ -418,6 +417,8 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             self._update_fallback_bars()
 
     def _draw_callback(self, area, cr, width, height, user_data):
+        if width <= 0 or height <= 0:
+            return
         # Extract colors
         bg_r, bg_g, bg_b = self._bg_color
         ac_r, ac_g, ac_b = self._accent_color

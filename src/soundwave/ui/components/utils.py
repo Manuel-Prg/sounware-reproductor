@@ -16,7 +16,7 @@ def hex_to_rgb(hex_str: str, default: tuple[float, float, float] = (0.48, 0.28, 
 
 
 def draw_rounded_rect(cr, x, y, w, h, r):
-    if h <= 0:
+    if w <= 0 or h <= 0:
         return
     if r > w / 2.0:
         r = w / 2.0

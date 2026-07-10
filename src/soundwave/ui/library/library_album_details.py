@@ -149,16 +149,24 @@ class LibraryAlbumDetailsMixin:
             for ext in (".jpg", ".png"):
                 cached = ART_CACHE_DIR / f"{s.id}{ext}"
                 if cached.exists():
-                    art_texture = Gdk.Texture.new_from_filename(str(cached))
-                    break
+                    try:
+                        art_texture = Gdk.Texture.new_from_filename(str(cached))
+                        break
+                    except Exception as e:
+                        print(f"Gdk.Texture error loading cached {cached}: {e}")
+                        pass
             if art_texture:
                 break
         if not art_texture:
             for s in songs:
                 art_path = get_art_path(s.id, self.db) if s.id is not None else None
                 if art_path and art_path.exists():
-                    art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                    break
+                    try:
+                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                        break
+                    except Exception as e:
+                        print(f"Gdk.Texture error loading {art_path}: {e}")
+                        art_texture = None
 
         self._album_details_avatar.set_text(album_name)
         if art_texture:

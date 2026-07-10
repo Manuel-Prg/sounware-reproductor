@@ -18,20 +18,20 @@ RULE_FIELDS = {
 def build_query(rules: dict) -> tuple[str, list]:
     conditions = []
     params = []
-    order_by = "artist, album, track_number"
+    order_by = "artist COLLATE NOCASE, album COLLATE NOCASE, track_number"
     limit = ""
 
     for key, value in rules.items():
         if value is None or value == "":
             continue
         if key == "genre":
-            conditions.append("LOWER(genre) = LOWER(?)")
+            conditions.append("genre COLLATE NOCASE = ?")
             params.append(value)
         elif key == "artist":
-            conditions.append("LOWER(artist) = LOWER(?)")
+            conditions.append("artist COLLATE NOCASE = ?")
             params.append(value)
         elif key == "album":
-            conditions.append("LOWER(album) = LOWER(?)")
+            conditions.append("album COLLATE NOCASE = ?")
             params.append(value)
         elif key == "year_min":
             conditions.append("year >= ?")

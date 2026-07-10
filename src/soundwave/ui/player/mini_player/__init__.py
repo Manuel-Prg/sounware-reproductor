@@ -63,10 +63,15 @@ class MiniPlayer(Gtk.Window):
 
     def set_artwork_from_path(self, art_path: Optional[Path]):
         if art_path and art_path.exists():
-            texture = Gdk.Texture.new_from_filename(str(art_path))
-            self._art_image.set_paintable(texture)
-            bg, accent, fg = get_theme_colors_from_art(art_path)
-            update_theme_css(self.get_display(), self._theme_provider, bg, accent, fg)
+            try:
+                texture = Gdk.Texture.new_from_filename(str(art_path))
+                self._art_image.set_paintable(texture)
+                bg, accent, fg = get_theme_colors_from_art(art_path)
+                update_theme_css(self.get_display(), self._theme_provider, bg, accent, fg)
+            except Exception as e:
+                print(f"Gdk.Texture error in mini_player: {e}")
+                self._art_image.set_paintable(None)
+                reset_theme(self.get_display(), self._theme_provider)
         else:
             self._art_image.set_paintable(None)
             reset_theme(self.get_display(), self._theme_provider)

@@ -35,6 +35,7 @@ class MusicScanner:
         total = len(music_files)
         added = 0
         skipped = 0
+        songs_to_process_waveform: list[tuple[int, Path]] = []
 
         if total == 0:
             if progress_cb:
@@ -60,13 +61,21 @@ class MusicScanner:
                 except Exception as e:
                     print(f"[Scanner] Error procesando archivo: {e}")
                     result = "skipped"
-                if result == "added":
+                if isinstance(result, tuple) and result[0] == "added":
+                    added += 1
+                    songs_to_process_waveform.append((result[1], fut_to_path[future]))
+                elif result == "added":
                     added += 1
                 elif result == "skipped":
                     skipped += 1
                 if progress_cb:
                     path = fut_to_path[future]
                     progress_cb(done_count, total, f"Procesando: {path.name}")
+
+        # Process waveforms in batch after all metadata is loaded
+        if songs_to_process_waveform and progress_cb:
+            progress_cb(total, total, "Generando formas de onda...")
+        self._process_waveforms_batch(songs_to_process_waveform, progress_cb, total)
 
         if progress_cb:
             progress_cb(total, total, f"Completado: {added} añadidas, {skipped} omitidas")
@@ -87,7 +96,7 @@ class MusicScanner:
         except Exception as e:
             print(f"Error pre-cacheando carátula para archivo único: {e}")
             
-        # Pre-calculate waveform
+        # Pre-calculate waveform for single file (keep immediate for UX)
         try:
             from soundwave.library.utils.waveform_helper import generate_waveform_data
             db_song = self.db.get_song(song.id)
@@ -138,34 +147,50 @@ class MusicScanner:
             pass
         return files
 
-    def _process_file(self, filepath: Path) -> str:
-        local_db = None
+    def _process_file(self, filepath: Path) -> str | tuple[str, int]:
         try:
-            local_db = Database(self.db.db_path)
             song = read_metadata(str(filepath))
             if song is None:
                 return "skipped"
-            song_id = local_db.add_song(song)
+            song_id = self.db.add_song(song)
             try:
                 from soundwave.library.metadata.album_art import get_art_path
-                get_art_path(song_id, local_db)
+                get_art_path(song_id, self.db)
             except Exception as e:
                 print(f"Error pre-cacheando carátula en lote: {e}")
-                
-            # Pre-calculate waveform
+            
+            # Return song_id for deferred waveform processing
+            return ("added", song_id)
+        except Exception:
+            return "skipped"
+
+    def _process_waveforms_batch(self, songs: list[tuple[int, Path]], 
+                                  progress_cb: Optional[ProgressCallback] = None,
+                                  total: int = 0):
+        """Process waveforms for songs in batch after metadata is loaded."""
+        if not songs:
+            return
+        
+        waveforms_to_update: dict[int, str] = {}
+        processed = 0
+        
+        for song_id, filepath in songs:
+            if self._cancelled:
+                break
             try:
-                db_song = local_db.get_song(song_id)
+                db_song = self.db.get_song(song_id)
                 if db_song and not db_song.waveform_data:
                     from soundwave.library.utils.waveform_helper import generate_waveform_data
                     wave = generate_waveform_data(str(filepath), num_points=150)
                     if wave:
-                        local_db.update_song_waveform(song_id, json.dumps(wave))
+                        waveforms_to_update[song_id] = json.dumps(wave)
             except Exception as e:
-                print(f"Error pre-calculando forma de onda en lote: {e}")
-                
-            return "added"
-        except Exception:
-            return "skipped"
-        finally:
-            if local_db:
-                local_db.close()
+                print(f"Error generando forma de onda: {e}")
+            
+            processed += 1
+            if progress_cb and total > 0:
+                progress_cb(total, total, f"Generando formas de onda: {processed}/{len(songs)}")
+        
+        # Batch update waveforms
+        if waveforms_to_update:
+            self.db.update_waveforms_batch(waveforms_to_update)

@@ -364,15 +364,19 @@ class PlayerBar(Gtk.CenterBox):
 
     def set_artwork_from_path(self, art_path: Optional[Path]):
         if art_path and art_path.exists():
-            texture = Gdk.Texture.new_from_filename(str(art_path))
-            self._art_image.set_from_paintable(texture)
             try:
-                from soundwave.library.metadata.color_extract import get_theme_colors_from_art
-                _, accent_hex, _ = get_theme_colors_from_art(art_path)
-                r, g, b = hex_to_rgb(accent_hex)
-                self._progress_scale.set_accent_color(r, g, b)
-            except Exception:
-                pass
+                texture = Gdk.Texture.new_from_filename(str(art_path))
+                self._art_image.set_from_paintable(texture)
+                try:
+                    from soundwave.library.metadata.color_extract import get_theme_colors_from_art
+                    _, accent_hex, _ = get_theme_colors_from_art(art_path)
+                    r, g, b = hex_to_rgb(accent_hex)
+                    self._progress_scale.set_accent_color(r, g, b)
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"Gdk.Texture error in player_bar: {e}")
+                self._art_image.set_from_paintable(None)
         else:
             self._art_image.set_from_paintable(None)
             self._progress_scale.reset_colors()

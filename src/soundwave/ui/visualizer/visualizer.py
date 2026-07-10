@@ -336,12 +336,13 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
 
         art_path = get_art_path(song.id, self.db) if song.id is not None else None
         if art_path and art_path.exists():
-            self._art_picture.set_filename(str(art_path))
-            self._bg_picture.set_filename(str(art_path))
             try:
-                bg_hex, accent_hex, fg_hex = get_theme_colors_from_art(art_path)
-                self._bg_color = hex_to_rgb(bg_hex)
-                self._accent_color = hex_to_rgb(accent_hex)
+                self._art_picture.set_filename(str(art_path))
+                self._bg_picture.set_filename(str(art_path))
+                try:
+                    bg_hex, accent_hex, fg_hex = get_theme_colors_from_art(art_path)
+                    self._bg_color = hex_to_rgb(bg_hex)
+                    self._accent_color = hex_to_rgb(accent_hex)
                 self._fg_color = hex_to_rgb(fg_hex)
             except Exception:
                 pass

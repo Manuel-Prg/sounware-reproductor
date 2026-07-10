@@ -122,14 +122,16 @@ class Database:
                 FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist);
-            CREATE INDEX IF NOT EXISTS idx_songs_album ON songs(album);
-            CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs(genre);
+            CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_songs_album ON songs(album COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_songs_genre ON songs(genre COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_songs_filepath ON songs(filepath);
-            CREATE INDEX IF NOT EXISTS idx_songs_album_artist ON songs(album_artist);
+            CREATE INDEX IF NOT EXISTS idx_songs_album_artist ON songs(album_artist COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_songs_play_count ON songs(play_count);
             CREATE INDEX IF NOT EXISTS idx_songs_last_played ON songs(last_played);
             CREATE INDEX IF NOT EXISTS idx_songs_rating ON songs(rating);
+            CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_songs_composer ON songs(composer COLLATE NOCASE);
         """)
         # Migración automática para bases de datos ya existentes
         existing_cols = {
@@ -183,6 +185,48 @@ class Database:
         self.conn.commit()
         return row[0]
 
+    def add_songs_batch(self, songs: list[Song]) -> list[int]:
+        """Add multiple songs in a single transaction for better performance."""
+        song_ids = []
+        self.conn.execute("BEGIN TRANSACTION")
+        try:
+            for song in songs:
+                cur = self.conn.execute("""
+                    INSERT INTO songs (filepath,title,artist,album,album_artist,
+                        track_number,disc_number,duration,genre,year,composer,
+                        has_embedded_art,art_mime,file_size,modified_at,added_at,
+                        replaygain_track_gain,replaygain_album_gain,waveform_data)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(filepath) DO UPDATE SET
+                        title=excluded.title, artist=excluded.artist,
+                        album=excluded.album, album_artist=excluded.album_artist,
+                        track_number=excluded.track_number, disc_number=excluded.disc_number,
+                        duration=excluded.duration, genre=excluded.genre,
+                        year=excluded.year, composer=excluded.composer,
+                        has_embedded_art=excluded.has_embedded_art,
+                        art_mime=excluded.art_mime, file_size=excluded.file_size,
+                        modified_at=excluded.modified_at,
+                        replaygain_track_gain=excluded.replaygain_track_gain,
+                        replaygain_album_gain=excluded.replaygain_album_gain,
+                        waveform_data=CASE WHEN excluded.waveform_data != '' THEN excluded.waveform_data ELSE songs.waveform_data END
+                    RETURNING id
+                """, (
+                    song.filepath, song.title, song.artist, song.album,
+                    song.album_artist, song.track_number, song.disc_number,
+                    song.duration, song.genre, song.year, song.composer,
+                    int(song.has_embedded_art), song.art_mime,
+                    song.file_size, song.modified_at, song.added_at,
+                    song.replaygain_track_gain, song.replaygain_album_gain,
+                    song.waveform_data
+                ))
+                row = cur.fetchone()
+                song_ids.append(row[0])
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return song_ids
+
     def remove_song(self, song_id: int):
         self.conn.execute("DELETE FROM songs WHERE id = ?", (song_id,))
         self.conn.commit()
@@ -207,9 +251,13 @@ class Database:
         q = f"%{query}%"
         rows = self.conn.execute("""
             SELECT * FROM songs WHERE
-                title LIKE ? OR artist LIKE ? OR album LIKE ? OR genre LIKE ?
-            ORDER BY artist, album, track_number
-        """, (q, q, q, q)).fetchall()
+                title LIKE ? COLLATE NOCASE OR 
+                artist LIKE ? COLLATE NOCASE OR 
+                album LIKE ? COLLATE NOCASE OR 
+                genre LIKE ? COLLATE NOCASE OR
+                composer LIKE ? COLLATE NOCASE
+            ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, track_number
+        """, (q, q, q, q, q)).fetchall()
         return [self._row_to_song(r) for r in rows]
 
     def get_albums(self) -> list[dict]:
@@ -302,10 +350,41 @@ class Database:
         """, (time.time(), song_id))
         self.conn.commit()
 
+    def update_play_counts_batch(self, song_ids: list[int]):
+        """Update play counts for multiple songs in a single transaction."""
+        if not song_ids:
+            return
+        now = time.time()
+        self.conn.execute("BEGIN TRANSACTION")
+        try:
+            for song_id in song_ids:
+                self.conn.execute(
+                    "UPDATE songs SET play_count = play_count + 1, last_played = ? WHERE id = ?",
+                    (now, song_id)
+                )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def update_rating(self, song_id: int, rating: int):
         rating = max(0, min(5, rating))
         self.conn.execute("UPDATE songs SET rating = ? WHERE id = ?", (rating, song_id))
         self.conn.commit()
+
+    def update_ratings_batch(self, ratings: dict[int, int]):
+        """Update ratings for multiple songs in a single transaction."""
+        if not ratings:
+            return
+        self.conn.execute("BEGIN TRANSACTION")
+        try:
+            for song_id, rating in ratings.items():
+                rating = max(0, min(5, rating))
+                self.conn.execute("UPDATE songs SET rating = ? WHERE id = ?", (rating, song_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     # ---- Playlists ----
     def create_playlist(self, name: str) -> int:
@@ -382,6 +461,19 @@ class Database:
     def update_song_waveform(self, song_id: int, waveform_data: str):
         self.conn.execute("UPDATE songs SET waveform_data = ? WHERE id = ?", (waveform_data, song_id))
         self.conn.commit()
+
+    def update_waveforms_batch(self, waveforms: dict[int, str]):
+        """Update waveforms for multiple songs in a single transaction."""
+        if not waveforms:
+            return
+        self.conn.execute("BEGIN TRANSACTION")
+        try:
+            for song_id, waveform_data in waveforms.items():
+                self.conn.execute("UPDATE songs SET waveform_data = ? WHERE id = ?", (waveform_data, song_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     # ---- Helpers ----
     def _row_to_song(self, row: sqlite3.Row) -> Song:

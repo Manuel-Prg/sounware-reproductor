@@ -172,16 +172,21 @@ class LibraryCardsMixin:
                     try:
                         art_texture = Gdk.Texture.new_from_filename(str(cached))
                         break
-                    except Exception:
+                    except Exception as e:
+                        print(f"Gdk.Texture error loading cached {cached}: {e}")
                         pass
             # If not in cache, check DB
             if not art_texture:
                 try:
                     art_path = get_art_path(rep_id, self.db)
                     if art_path and art_path.exists():
-                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                except Exception:
-                    pass
+                        try:
+                            art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                        except Exception as e:
+                            print(f"Gdk.Texture error loading {art_path}: {e}")
+                            art_texture = None
+                except Exception as e:
+                    print(f"Error getting art path for {rep_id}: {e}")
 
         # Get view mode
         view_mode = getattr(self, "_album_view_mode", "circle")
@@ -300,16 +305,21 @@ class LibraryCardsMixin:
                     try:
                         art_texture = Gdk.Texture.new_from_filename(str(cached))
                         break
-                    except Exception:
+                    except Exception as e:
+                        print(f"Gdk.Texture error loading cached {cached}: {e}")
                         pass
             # If not in cache, check DB
             if not art_texture:
                 try:
                     art_path = get_art_path(rep_id, self.db)
                     if art_path and art_path.exists():
-                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                except Exception:
-                    pass
+                        try:
+                            art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                        except Exception as e:
+                            print(f"Gdk.Texture error loading {art_path}: {e}")
+                            art_texture = None
+                except Exception as e:
+                    print(f"Error getting art path for {rep_id}: {e}")
 
         avatar = Adw.Avatar(size=120, text=artist["artist"], show_initials=True)
         if art_texture:
@@ -540,16 +550,21 @@ class LibraryCardsMixin:
                     try:
                         art_texture = Gdk.Texture.new_from_filename(str(cached))
                         break
-                    except Exception:
+                    except Exception as e:
+                        print(f"Gdk.Texture error loading cached {cached}: {e}")
                         pass
             # If not in cache, check DB
             if not art_texture:
                 try:
                     art_path = get_art_path(rep_id, self.db)
                     if art_path and art_path.exists():
-                        art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                except Exception:
-                    pass
+                        try:
+                            art_texture = Gdk.Texture.new_from_filename(str(art_path))
+                        except Exception as e:
+                            print(f"Gdk.Texture error loading {art_path}: {e}")
+                            art_texture = None
+                except Exception as e:
+                    print(f"Error getting art path for {rep_id}: {e}")
                     
         thumbnail = Gtk.Box()
         thumbnail.set_size_request(40, 40)

@@ -199,15 +199,13 @@ class LibraryCardsMixin:
                 img_container.set_valign(Gtk.Align.CENTER)
                 img_container.add_css_class("album-cover-container")
                 
-                img = Gtk.Image.new_from_paintable(art_texture)
+                img = Gtk.Picture.new_for_paintable(art_texture)
                 img.set_size_request(120, 120)
+                img.set_content_fit(Gtk.ContentFit.COVER)
                 img.set_halign(Gtk.Align.CENTER)
                 img.set_valign(Gtk.Align.CENTER)
                 img_container.append(img)
                 
-                provider = Gtk.CssProvider()
-                provider.load_from_string(".album-cover-container { border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease, box-shadow 0.2s ease; }")
-                img_container.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
                 overlay.set_child(img_container)
             else:
                 fallback = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -230,7 +228,7 @@ class LibraryCardsMixin:
                 bg_color = colors[h % len(colors)]
                 
                 provider = Gtk.CssProvider()
-                provider.load_from_string(f".album-fallback-square {{ background-color: {bg_color}; color: #ffffff; border-radius: 8px; font-weight: 800; font-size: 28px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease, box-shadow 0.2s ease; }}")
+                provider.load_from_string(f".album-fallback-square {{ background-color: {bg_color}; }}")
                 fallback.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
                 overlay.set_child(fallback)
         else:
@@ -572,13 +570,11 @@ class LibraryCardsMixin:
         thumbnail.set_valign(Gtk.Align.CENTER)
         
         if art_texture:
-            img = Gtk.Image.new_from_paintable(art_texture)
+            img = Gtk.Picture.new_for_paintable(art_texture)
             img.set_size_request(40, 40)
+            img.set_content_fit(Gtk.ContentFit.COVER)
             thumbnail.append(img)
             thumbnail.add_css_class("album-list-thumb")
-            provider = Gtk.CssProvider()
-            provider.load_from_string(".album-list-thumb { border-radius: 4px; }")
-            thumbnail.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         else:
             initials = album["album"][:1] if album["album"] else "?"
             lbl = Gtk.Label(label=initials.upper())
@@ -591,7 +587,7 @@ class LibraryCardsMixin:
             bg_color = colors[h % len(colors)]
             
             provider = Gtk.CssProvider()
-            provider.load_from_string(f".album-list-thumb-fallback {{ background-color: {bg_color}; color: #ffffff; border-radius: 4px; font-weight: bold; font-size: 14px; }}")
+            provider.load_from_string(f".album-list-thumb-fallback {{ background-color: {bg_color}; }}")
             thumbnail.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             
         row.add_prefix(thumbnail)

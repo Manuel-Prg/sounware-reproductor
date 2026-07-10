@@ -7,8 +7,12 @@ from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
 import random
+import re
 
 from soundwave.library.database.database import Song
+
+_SPECTRUM_BRACES_RE = re.compile(r'magnitude=(?:\([a-zA-Z]+\))?{([^}]+)}')
+_SPECTRUM_FLOAT_RE = re.compile(r'magnitude=\(float\)([-0-9.]*)')
 
 
 class PlayerState(Enum):
@@ -724,18 +728,24 @@ class Player:
                         if magnitudes:
                             if hasattr(magnitudes, "get_size"):
                                 m_list = [magnitudes.get_nth(i) for i in range(magnitudes.get_size())]
+                            elif isinstance(magnitudes, (list, tuple)):
+                                m_list = magnitudes
                             else:
-                                m_list = list(magnitudes)
+                                try:
+                                    m_list = [magnitudes[i] for i in range(len(magnitudes))]
+                                except Exception:
+                                    m_list = list(magnitudes)
                             self._emit_spectrum(m_list)
-                    except TypeError:
+                    except (TypeError, ValueError, IndexError):
                         struct_str = struct.to_string()
-                        import re
-                        match = re.search(r'magnitude=(?:\([a-zA-Z]+\))?{([^}]+)}', struct_str)
+                        match = _SPECTRUM_BRACES_RE.search(struct_str)
                         if not match:
-                            match = re.search(r'magnitude=\(float\)([-0-9.]+)', struct_str)
+                            match = _SPECTRUM_FLOAT_RE.search(struct_str)
                             if match:
                                 try:
-                                    self._emit_spectrum([float(match.group(1))])
+                                    val_str = match.group(1)
+                                    if val_str:
+                                        self._emit_spectrum([float(val_str)])
                                 except Exception:
                                     pass
                                 return

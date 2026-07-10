@@ -141,9 +141,13 @@ class WaveformDrawingArea(Gtk.DrawingArea):
         self.queue_draw()
 
     def _draw_callback(self, area, cr, width, height, user_data):
+        if width < 4 or height < 4:
+            return
         if not self._sensitive:
             cr.set_source_rgba(0.5, 0.5, 0.5, 0.15)
-            draw_rounded_rect(cr, 0, height/2 - 2, width, 4, 2)
+            # Para el estado inactivo dibujamos un rectángulo plano y nítido de 4px de alto
+            # para evitar advertencias de redondeo con floats infinitesimales en el inicio.
+            cr.rectangle(0, height/2 - 2, width, 4)
             cr.fill()
             return
 
@@ -154,8 +158,18 @@ class WaveformDrawingArea(Gtk.DrawingArea):
                 for i in range(150)
             ]
 
-        num_bars = len(waveform)
         spacing = 1.0
+        # Calculate how many bars can fit in the available width
+        max_possible_bars = int((width + spacing) / (1.0 + spacing))
+        if max_possible_bars < 1:
+            max_possible_bars = 1
+
+        num_bars = len(waveform)
+        if num_bars > max_possible_bars:
+            num_bars = max_possible_bars
+            step = len(waveform) / num_bars
+            waveform = [waveform[int(i * step)] for i in range(num_bars)]
+
         bar_width = (width - (num_bars - 1) * spacing) / num_bars
         if bar_width < 1.0:
             bar_width = 1.0
@@ -183,7 +197,10 @@ class WaveformDrawingArea(Gtk.DrawingArea):
                 r, g, b, a = self._dim_color
                 cr.set_source_rgba(r, g, b, a)
                 
-            draw_rounded_rect(cr, x, y, bar_width, bar_h, bar_width / 2.0)
+            if bar_width < 4.0 or bar_h < 4.0:
+                cr.rectangle(x, y, bar_width, bar_h)
+            else:
+                draw_rounded_rect(cr, x, y, bar_width, bar_h, bar_width / 2.0)
             cr.fill()
 
 

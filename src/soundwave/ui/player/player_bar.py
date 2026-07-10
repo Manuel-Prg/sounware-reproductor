@@ -55,7 +55,8 @@ class PlayerBar(Gtk.CenterBox):
 
         self._art_image = Gtk.Image()
         self._art_image.set_pixel_size(56)
-        self._art_image.set_css_classes(["album-cover"])
+        self._art_image.set_halign(Gtk.Align.CENTER)
+        self._art_image.set_valign(Gtk.Align.CENTER)
         self._art_image.set_tooltip_text("Mostrar visualizador")
         try:
             display = Gdk.Display.get_default()
@@ -367,6 +368,7 @@ class PlayerBar(Gtk.CenterBox):
             try:
                 texture = Gdk.Texture.new_from_filename(str(art_path))
                 self._art_image.set_from_paintable(texture)
+                self._art_image.add_css_class("album-cover")
                 try:
                     from soundwave.library.metadata.color_extract import get_theme_colors_from_art
                     _, accent_hex, _ = get_theme_colors_from_art(art_path)
@@ -377,8 +379,10 @@ class PlayerBar(Gtk.CenterBox):
             except Exception as e:
                 print(f"Gdk.Texture error in player_bar: {e}")
                 self._art_image.set_from_paintable(None)
+                self._art_image.remove_css_class("album-cover")
         else:
             self._art_image.set_from_paintable(None)
+            self._art_image.remove_css_class("album-cover")
             self._progress_scale.reset_colors()
 
     def _on_song_changed(self, song: Optional[Song]):
@@ -389,6 +393,7 @@ class PlayerBar(Gtk.CenterBox):
             self._progress_scale.set_waveform([])
             self._progress_scale.set_progress(0.0)
             self._art_image.set_from_paintable(None)
+            self._art_image.remove_css_class("album-cover")
             return
 
         self._title_label.set_label(song.display_title)
@@ -422,7 +427,8 @@ class PlayerBar(Gtk.CenterBox):
                     local_db.update_song_waveform(song.id, json.dumps(wave))
                     local_db.close()
                 except Exception as e:
-                    print(f"Error caching waveform to db: {e}")
+                    if "closed database" not in str(e).lower():
+                        print(f"Error caching waveform to db: {e}")
                 GLib.idle_add(self._on_waveform_generated, song.id, wave)
 
         threading.Thread(target=run_generation, daemon=True).start()

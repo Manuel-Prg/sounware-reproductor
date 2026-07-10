@@ -90,6 +90,20 @@ APP_CSS_TEMPLATE = """
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
             border-radius: 8px;
         }
+        .album-fallback-square {
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 28px;
+        }
+        .album-list-thumb {
+            border-radius: 4px;
+        }
+        .album-list-thumb-fallback {
+            color: #ffffff;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+        }
         .album-card:hover .album-cover-container, .album-card:hover .album-fallback-square {
             transform: scale(1.04);
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
@@ -398,21 +412,21 @@ APP_CSS_TEMPLATE = """
         .play-button-main {
             background-color: @accent_bg_color;
             color: #000000;
-            border-radius: 50%;
-            box-shadow: 0 4px 14px @accent_shadow_30;
+            border-radius: 9999px;
+            box-shadow: none;
             transition: all 0.2s ease;
             padding: 0;
         }
         .play-button-main:hover {
             transform: scale(1.08);
             background-color: @accent_hover_color;
-            box-shadow: 0 6px 20px @accent_shadow_45;
+            box-shadow: 0 4px 12px @accent_shadow_45;
         }
         .green-deck-btn {
             background-color: @accent_bg_color;
             color: #000000;
-            border-radius: 50%;
-            box-shadow: 0 4px 14px @accent_shadow_30;
+            border-radius: 9999px;
+            box-shadow: none;
             transition: all 0.2s ease;
         }
         .green-deck-btn:hover {

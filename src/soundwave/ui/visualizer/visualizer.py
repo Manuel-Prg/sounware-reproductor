@@ -220,13 +220,13 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
         .discography-song-title-current,
         .discography-song-duration-current,
         .discography-song-icon-current {{
-            color: rgb({ri}, {gi}, {bi}) !important;
+            color: rgb({ri}, {gi}, {bi});
         }}
         .discography-song-row-current {{
-            background-color: rgba({ri}, {gi}, {bi}, 0.12) !important;
+            background-color: rgba({ri}, {gi}, {bi}, 0.12);
         }}
         .discography-song-row-current:hover {{
-            background-color: rgba({ri}, {gi}, {bi}, 0.18) !important;
+            background-color: rgba({ri}, {gi}, {bi}, 0.18);
         }}
         """)
 
@@ -518,6 +518,18 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
 
         # Modes 0, 1, 2: Horizontal layouts
         spacing = 4
+        max_possible_bars = int((width - spacing) / (1.0 + spacing))
+        if max_possible_bars < 1:
+            max_possible_bars = 1
+
+        values = self._current_values
+        if len(values) > max_possible_bars:
+            step = len(values) / max_possible_bars
+            values = [values[int(i * step)] for i in range(max_possible_bars)]
+            num_bars = max_possible_bars
+        else:
+            num_bars = len(values)
+
         bar_width = (width - spacing * (num_bars + 1)) / num_bars
         if bar_width < 1.0:
             bar_width = 1.0
@@ -538,7 +550,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             # Start at left baseline
             cr.move_to(0, baseline)
             for i in range(num_bars):
-                val = self._current_values[i]
+                val = values[i]
                 bar_h = val * max_h
                 x = spacing + i * (bar_width + spacing) + bar_width / 2.0
                 y = baseline - bar_h
@@ -567,7 +579,7 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
             block_h = 4.0
             block_spacing = 2.0
             for i in range(num_bars):
-                val = self._current_values[i]
+                val = values[i]
                 bar_h = val * max_h
                 num_blocks = int(bar_h / (block_h + block_spacing))
                 if num_blocks < 1:
@@ -575,18 +587,24 @@ class VisualizerView(Gtk.Overlay, VisualizerDiscographyMixin):
                 x = spacing + i * (bar_width + spacing)
                 for b in range(num_blocks):
                     y = baseline - b * (block_h + block_spacing) - block_h
-                    draw_rounded_rect(cr, x, y, bar_width, block_h, 1.0)
+                    if bar_width < 4.0:
+                        cr.rectangle(x, y, bar_width, block_h)
+                    else:
+                        draw_rounded_rect(cr, x, y, bar_width, block_h, 1.0)
                     cr.fill()
         else:
             # Mode 0: Rounded Vertical Bars
             for i in range(num_bars):
-                val = self._current_values[i]
+                val = values[i]
                 bar_h = val * max_h
                 if bar_h < 2.0:
                     bar_h = 2.0
                 x = spacing + i * (bar_width + spacing)
                 y = baseline - bar_h
-                draw_rounded_rect(cr, x, y, bar_width, bar_h, min(bar_width / 2.0, 4.0))
+                if bar_width < 4.0:
+                    cr.rectangle(x, y, bar_width, bar_h)
+                else:
+                    draw_rounded_rect(cr, x, y, bar_width, bar_h, min(bar_width / 2.0, 4.0))
                 cr.fill()
 
     def _on_spectrum_data(self, magnitudes: list[float]):

@@ -406,7 +406,10 @@ class SoundwaveWindow(Adw.ApplicationWindow, WindowSidebarMixin, WindowLibrarySc
                 if added > 0 or removed > 0:
                     GLib.idle_add(self._refresh_library)
             except Exception as e:
-                print(f"[Silent Startup Scan] Error: {e}")
+                if "closed database" in str(e).lower():
+                    pass
+                else:
+                    print(f"[Silent Startup Scan] Error: {e}")
 
         import threading
         thread = threading.Thread(target=scan_task, daemon=True)

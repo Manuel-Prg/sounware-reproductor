@@ -65,6 +65,7 @@ APP_CSS_TEMPLATE = """
             margin: 16px;
         }
         .album-grid flowboxchild, .artist-grid flowboxchild {
+            width: 140px;
             padding: 8px;
             border-radius: 12px;
             transition: background-color 0.2s ease;
@@ -73,6 +74,7 @@ APP_CSS_TEMPLATE = """
             background-color: alpha(@accent_bg_color, 0.04);
         }
         .album-card, .artist-card {
+            width: 140px;
             padding: 8px;
             background-color: transparent;
         }
@@ -86,6 +88,8 @@ APP_CSS_TEMPLATE = """
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
         }
         .album-cover-container, .album-fallback-square {
+            width: 120px;
+            height: 120px;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
             border-radius: 8px;

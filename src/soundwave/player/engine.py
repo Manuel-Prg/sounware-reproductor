@@ -10,6 +10,7 @@ import random
 import re
 
 from soundwave.library.database.database import Song
+from soundwave.player.queue_manager import QueueManager, RepeatMode
 
 _SPECTRUM_BRACES_RE = re.compile(r'magnitude=(?:\([a-zA-Z]+\))?{([^}]+)}')
 _SPECTRUM_FLOAT_RE = re.compile(r'magnitude=\(float\)([-0-9.]*)')
@@ -19,12 +20,6 @@ class PlayerState(Enum):
     STOPPED = "stopped"
     PLAYING = "playing"
     PAUSED  = "paused"
-
-
-class RepeatMode(Enum):
-    NONE = "none"
-    ALL  = "all"
-    ONE  = "one"
 
 
 @dataclass
@@ -65,12 +60,8 @@ class Player:
         self._spec2: Optional[Gst.Element] = None
         self._state      = PlayerState.STOPPED
         self._current_song: Optional[Song] = None
-        self._queue:     list[Song] = []
-        self._original_queue: list[Song] = []
-        self._current_index: int    = -1
+        self._queue_manager = QueueManager()
         self._volume:    float      = 1.0
-        self._repeat_mode            = RepeatMode.NONE
-        self._shuffle:   bool       = False
         self._equalizer: Optional[Gst.Element] = None
         self._spectrum:  Optional[Gst.Element] = None
         
@@ -226,8 +217,8 @@ class Player:
         self._emit_song()
 
     def play_pause(self):
-        if self._state == PlayerState.STOPPED and self._queue:
-            self.play_index(self._current_index if self._current_index >= 0 else 0)
+        if self._state == PlayerState.STOPPED and self._queue_manager.queue:
+            self.play_index(self._queue_manager.current_index if self._queue_manager.current_index >= 0 else 0)
             return
         if self._state == PlayerState.PLAYING:
             self._finish_crossfade_immediately()
@@ -248,30 +239,27 @@ class Player:
         self._emit_position(PlaybackPosition(0, 0))
 
     def next(self):
-        if not self._queue:
+        if not self._queue_manager.queue:
             return
-        if self._repeat_mode == RepeatMode.ONE and self._current_song:
+        if self._queue_manager.repeat_mode == RepeatMode.ONE and self._current_song:
             self.play_file(self._current_song)
             return
-        next_idx = self._current_index + 1
-        if next_idx >= len(self._queue):
-            if self._repeat_mode == RepeatMode.ALL:
-                next_idx = 0
-            else:
-                self.stop()
-                return
+        next_idx = self._queue_manager.get_next_index()
+        if next_idx == -1:
+            self.stop()
+            return
         self.play_index(next_idx)
 
     def previous(self):
-        if not self._queue:
+        if not self._queue_manager.queue:
             return
         pos = self.get_position()
         if pos and pos.current_seconds > 3:
             self.seek(0)
             return
-        prev_idx = self._current_index - 1
-        if prev_idx < 0:
-            prev_idx = len(self._queue) - 1 if self._repeat_mode == RepeatMode.ALL else 0
+        prev_idx = self._queue_manager.get_previous_index()
+        if prev_idx == -1:
+            return
         self.play_index(prev_idx)
 
     def seek(self, position_ns: int):
@@ -320,136 +308,56 @@ class Player:
     # --- Queue ---
 
     def set_queue(self, songs: list[Song], start_index: int = 0):
-        self._original_queue = list(songs)
-        if self._shuffle:
-            shuffled = list(songs)
-            if shuffled and 0 <= start_index < len(shuffled):
-                current_song = shuffled.pop(start_index)
-                random.shuffle(shuffled)
-                shuffled.insert(0, current_song)
-                self._queue = shuffled
-                self._current_index = 0
-            else:
-                self._queue = shuffled
-                self._current_index = start_index if self._queue else -1
-        else:
-            self._queue = list(songs)
-            self._current_index = start_index if self._queue else -1
-
-        if self._queue and 0 <= self._current_index < len(self._queue):
-            self.play_file(self._queue[self._current_index])
+        song = self._queue_manager.set_queue(songs, start_index)
+        if song:
+            self.play_file(song)
         self._emit_queue()
 
     def play_index(self, index: int):
-        if 0 <= index < len(self._queue):
-            self._current_index = index
-            self.play_file(self._queue[index])
+        song = self._queue_manager.play_index(index)
+        if song:
+            self.play_file(song)
 
     def add_to_queue(self, song: Song):
-        self._original_queue.append(song)
-        self._queue.append(song)
-        if self._current_index < 0:
-            self._current_index = 0
+        self._queue_manager.add_to_queue(song)
         self._emit_queue()
 
     def play_next(self, song: Song):
-        if not self._queue:
-            self.add_to_queue(song)
-            return
-
-        idx = self._current_index + 1
-        self._queue.insert(idx, song)
-
-        # Insertar en la cola original también
-        if self._current_song and self._current_song in self._original_queue:
-            try:
-                orig_idx = self._original_queue.index(self._current_song) + 1
-                self._original_queue.insert(orig_idx, song)
-            except ValueError:
-                self._original_queue.insert(idx, song)
-        else:
-            self._original_queue.insert(idx, song)
-
+        self._queue_manager.play_next(song, self._current_song)
         self._emit_queue()
 
     def reorder_queue(self, songs: list[Song]):
-        self._queue = list(songs)
-        if not self._shuffle:
-            self._original_queue = list(songs)
-        if self._current_song and self._current_song in self._queue:
-            try:
-                self._current_index = self._queue.index(self._current_song)
-            except ValueError:
-                self._current_index = -1
-        else:
-            self._current_index = -1
+        self._queue_manager.reorder_queue(songs, self._current_song)
         self._emit_queue()
 
     def remove_from_queue(self, index: int):
-        if 0 <= index < len(self._queue):
-            removed_song = self._queue.pop(index)
-            if removed_song in self._original_queue:
-                self._original_queue.remove(removed_song)
-            if index <= self._current_index:
-                self._current_index = max(-1, self._current_index - 1)
-            self._emit_queue()
+        self._queue_manager.remove_from_queue(index)
+        self._emit_queue()
 
     def clear_queue(self):
-        self._queue.clear()
-        self._original_queue.clear()
-        self._current_index = -1
+        self._queue_manager.clear_queue()
         self._emit_queue()
 
     def get_queue(self) -> list[Song]:
-        return list(self._queue)
+        return self._queue_manager.queue
 
     def get_current_index(self) -> int:
-        return self._current_index
+        return self._queue_manager.current_index
 
     # --- Repeat / Shuffle ---
 
     def set_repeat_mode(self, mode: RepeatMode):
-        self._repeat_mode = mode
+        self._queue_manager.repeat_mode = mode
 
     def get_repeat_mode(self) -> RepeatMode:
-        return self._repeat_mode
+        return self._queue_manager.repeat_mode
 
     def toggle_shuffle(self):
-        self._shuffle = not self._shuffle
-        if not self._queue:
-            return
-        
-        import random
-        current_song = self._current_song
-        
-        if self._shuffle:
-            # Si se activa el shuffle, guardamos el estado actual como cola original
-            if not self._original_queue:
-                self._original_queue = list(self._queue)
-            
-            shuffled = list(self._queue)
-            if current_song and current_song in shuffled:
-                idx = shuffled.index(current_song)
-                shuffled.pop(idx)
-                random.shuffle(shuffled)
-                shuffled.insert(0, current_song)
-                self._current_index = 0
-            else:
-                random.shuffle(shuffled)
-                self._current_index = 0 if shuffled else -1
-            self._queue = shuffled
-        else:
-            # Si se desactiva, restauramos la cola original
-            if self._original_queue:
-                self._queue = list(self._original_queue)
-                if current_song and current_song in self._queue:
-                    self._current_index = self._queue.index(current_song)
-                else:
-                    self._current_index = 0
+        self._queue_manager.toggle_shuffle(self._current_song)
         self._emit_queue()
 
     def get_shuffle(self) -> bool:
-        return self._shuffle
+        return self._queue_manager.shuffle
 
     # --- Equalizer ---
 
@@ -582,19 +490,16 @@ class Player:
         if not self._gapless_enabled:
             return
             
-        if self._repeat_mode == RepeatMode.ONE and self._current_song:
+        if self._queue_manager.repeat_mode == RepeatMode.ONE and self._current_song:
             GLib.idle_add(lambda: self.play_file(self._current_song))
             return
             
-        next_idx = self._current_index + 1
-        if next_idx >= len(self._queue):
-            if self._repeat_mode == RepeatMode.ALL:
-                next_idx = 0
-            else:
-                return
+        next_idx = self._queue_manager.get_next_index()
+        if next_idx == -1:
+            return
                 
-        song = self._queue[next_idx]
-        self._current_index = next_idx
+        song = self._queue_manager.queue[next_idx]
+        self._queue_manager.current_index = next_idx
         self._next_song = song
         playbin.set_property("uri", Path(song.filepath).resolve().as_uri())
         self._gapless_advanced = True
@@ -631,14 +536,11 @@ class Player:
             self._crossfade_fade_in_timer = None
 
     def _trigger_crossfade_transition(self, duration: float):
-        next_idx = self._current_index + 1
-        if next_idx >= len(self._queue):
-            if self._repeat_mode == RepeatMode.ALL:
-                next_idx = 0
-            else:
-                return
+        next_idx = self._queue_manager.get_next_index()
+        if next_idx == -1:
+            return
                 
-        next_song = self._queue[next_idx]
+        next_song = self._queue_manager.queue[next_idx]
         
         active_playbin = self._playbin
         inactive_playbin = self._playbin2 if active_playbin == self._playbin1 else self._playbin1
@@ -652,7 +554,7 @@ class Player:
         inactive_playbin.set_state(Gst.State.PLAYING)
         
         self._playbin = inactive_playbin
-        self._current_index = next_idx
+        self._queue_manager.current_index = next_idx
         self._current_song = next_song
         self._emit_song()
         

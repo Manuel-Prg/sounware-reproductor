@@ -6,6 +6,7 @@ from gi.repository import Adw
 from soundwave.ui.settings.general_page import GeneralPage
 from soundwave.ui.settings.connections_page import ConnectionsPage
 from soundwave.ui.settings.sync_page import SyncPage
+from soundwave.ui.settings.about_page import AboutPage
 
 
 class SettingsDialog(Adw.PreferencesWindow):
@@ -28,6 +29,10 @@ class SettingsDialog(Adw.PreferencesWindow):
         # Page 3: Sincronización
         self.sync_page = SyncPage(parent_window, self)
         self.add(self.sync_page)
+
+        # Page 4: Acerca de
+        self.about_page = AboutPage(parent_window, self)
+        self.add(self.about_page)
 
     def _show_error(self, message: str):
         toast = Adw.Toast.new(message)

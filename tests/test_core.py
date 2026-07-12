@@ -132,6 +132,13 @@ class TestSoundwaveCore(unittest.TestCase):
         from soundwave.ui.window.onboarding import OnboardingWindow
         self.assertTrue(issubclass(OnboardingWindow, Adw.Window))
 
+    def test_about_page_import(self):
+        import gi
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw
+        from soundwave.ui.settings.about_page import AboutPage
+        self.assertTrue(issubclass(AboutPage, Adw.PreferencesPage))
+
     def test_remove_missing_files(self):
         from soundwave.library.database import Database
         from soundwave.library.scanner.scanner import MusicScanner

@@ -1,13 +1,24 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, Pango, GLib, Gio, GObject
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Adw, Gdk, GdkPixbuf, Pango, GLib, Gio, GObject
 
 from pathlib import Path
 from typing import Optional
 
 from soundwave.library.database.database import Song, UNKNOWN_ARTIST, UNKNOWN_ALBUM, NO_GENRE
 from soundwave.library.metadata.album_art import get_art_path, CACHE_DIR as ART_CACHE_DIR
+
+
+def _load_scaled_texture(path: Path, size: int = 120) -> Optional[Gdk.Texture]:
+    try:
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), size, size, False)
+        if pixbuf:
+            return Gdk.Texture.new_for_pixbuf(pixbuf)
+    except Exception as e:
+        print(f"Error loading scaled texture from {path}: {e}")
+    return None
 
 
 class LibraryCardsMixin:
@@ -155,11 +166,16 @@ class LibraryCardsMixin:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_size_request(140, -1)
         box.add_css_class("album-card")
+        box.set_halign(Gtk.Align.CENTER)
         box.set_valign(Gtk.Align.START)
+        box.set_hexpand(False)
 
         overlay = Gtk.Overlay()
+        overlay.set_size_request(120, 120)
         overlay.set_halign(Gtk.Align.CENTER)
         overlay.set_valign(Gtk.Align.CENTER)
+        overlay.set_hexpand(False)
+        overlay.set_vexpand(False)
 
         # Try to find art for this album using representative_song_id directly (extremely fast)
         art_texture = None
@@ -169,22 +185,15 @@ class LibraryCardsMixin:
             for ext in (".jpg", ".png"):
                 cached = ART_CACHE_DIR / f"{rep_id}{ext}"
                 if cached.exists():
-                    try:
-                        art_texture = Gdk.Texture.new_from_filename(str(cached))
+                    art_texture = _load_scaled_texture(cached, 120)
+                    if art_texture:
                         break
-                    except Exception as e:
-                        print(f"Gdk.Texture error loading cached {cached}: {e}")
-                        pass
             # If not in cache, check DB
             if not art_texture:
                 try:
                     art_path = get_art_path(rep_id, self.db)
                     if art_path and art_path.exists():
-                        try:
-                            art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                        except Exception as e:
-                            print(f"Gdk.Texture error loading {art_path}: {e}")
-                            art_texture = None
+                        art_texture = _load_scaled_texture(art_path, 120)
                 except Exception as e:
                     print(f"Error getting art path for {rep_id}: {e}")
 
@@ -193,25 +202,22 @@ class LibraryCardsMixin:
 
         if view_mode == "grid":
             if art_texture:
-                img_container = Gtk.Box()
-                img_container.set_size_request(120, 120)
-                img_container.set_halign(Gtk.Align.CENTER)
-                img_container.set_valign(Gtk.Align.CENTER)
-                img_container.add_css_class("album-cover-container")
-                
                 img = Gtk.Picture.new_for_paintable(art_texture)
                 img.set_size_request(120, 120)
                 img.set_content_fit(Gtk.ContentFit.COVER)
                 img.set_halign(Gtk.Align.CENTER)
                 img.set_valign(Gtk.Align.CENTER)
-                img_container.append(img)
-                
-                overlay.set_child(img_container)
+                img.set_hexpand(False)
+                img.set_vexpand(False)
+                img.add_css_class("album-cover-container")
+                overlay.set_child(img)
             else:
                 fallback = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
                 fallback.set_size_request(120, 120)
                 fallback.set_halign(Gtk.Align.CENTER)
                 fallback.set_valign(Gtk.Align.CENTER)
+                fallback.set_hexpand(False)
+                fallback.set_vexpand(False)
                 fallback.add_css_class("album-fallback-square")
                 
                 initials = album["album"][:2] if album["album"] else "?"
@@ -290,7 +296,9 @@ class LibraryCardsMixin:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.set_size_request(140, -1)
         card.add_css_class("artist-card")
+        card.set_halign(Gtk.Align.CENTER)
         card.set_valign(Gtk.Align.START)
+        card.set_hexpand(False)
 
         # Find artist cover using representative_song_id directly (extremely fast)
         art_texture = None
@@ -300,22 +308,15 @@ class LibraryCardsMixin:
             for ext in (".jpg", ".png"):
                 cached = ART_CACHE_DIR / f"{rep_id}{ext}"
                 if cached.exists():
-                    try:
-                        art_texture = Gdk.Texture.new_from_filename(str(cached))
+                    art_texture = _load_scaled_texture(cached, 120)
+                    if art_texture:
                         break
-                    except Exception as e:
-                        print(f"Gdk.Texture error loading cached {cached}: {e}")
-                        pass
             # If not in cache, check DB
             if not art_texture:
                 try:
                     art_path = get_art_path(rep_id, self.db)
                     if art_path and art_path.exists():
-                        try:
-                            art_texture = Gdk.Texture.new_from_filename(str(art_path))
-                        except Exception as e:
-                            print(f"Gdk.Texture error loading {art_path}: {e}")
-                            art_texture = None
+                        art_texture = _load_scaled_texture(art_path, 120)
                 except Exception as e:
                     print(f"Error getting art path for {rep_id}: {e}")
 

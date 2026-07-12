@@ -3,9 +3,11 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Adw, Gdk, GdkPixbuf, GLib
 from pathlib import Path
 import webbrowser
+from typing import Optional
 
 
 class AboutPage(Adw.PreferencesPage):
@@ -17,176 +19,248 @@ class AboutPage(Adw.PreferencesPage):
         self.set_title("Acerca de")
         self.set_icon_name("help-about-symbolic")
 
-        # Main Group
-        group = Adw.PreferencesGroup()
-        self.add(group)
+        # Custom styles for the About Page
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_string("""
+            .about-header-box {
+                margin-top: 16px;
+                margin-bottom: 8px;
+            }
+            .about-logo-card {
+                background-color: @card_bg_color;
+                border: 1px solid @card_border_color;
+                border-radius: 18px;
+                padding: 16px 28px;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+            }
+            .about-logo {
+                border-radius: 12px;
+                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            }
+            .about-logo-sep {
+                color: @insensitive_fg_color;
+                font-weight: bold;
+                font-size: 20px;
+            }
+            .about-title {
+                margin-top: 12px;
+            }
+            .about-version {
+                margin-bottom: 12px;
+            }
+            .about-description {
+                margin-top: 6px;
+                margin-bottom: 16px;
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
-        # Main vertical container for About content
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        main_box.set_margin_top(24)
-        main_box.set_margin_bottom(24)
-        main_box.set_margin_start(16)
-        main_box.set_margin_end(16)
-        main_box.set_halign(Gtk.Align.CENTER)
-
-        # Container for the Logos side-by-side
-        logos_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-        logos_box.set_halign(Gtk.Align.CENTER)
-        logos_box.set_valign(Gtk.Align.CENTER)
-
-        # Determine paths
         project_root = Path(__file__).resolve().parents[4]
-        style_manager = Adw.StyleManager.get_default()
-        is_dark = style_manager.get_dark()
 
-        # 1. App Logo
-        app_logo_name = "icono-light-256.png"
-        app_logo_file = project_root / "data" / "icons" / app_logo_name
+        # ── Group 1: Header (No title) ───────────────────────────────────
+        header_group = Adw.PreferencesGroup()
+        self.add(header_group)
+
+        # Header vertical box
+        header_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        header_box.add_css_class("about-header-box")
+        header_box.set_halign(Gtk.Align.CENTER)
+        header_group.add(header_box)
+
+        # Logo Card
+        logo_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
+        logo_card.add_css_class("about-logo-card")
+        logo_card.set_halign(Gtk.Align.CENTER)
+        logo_card.set_valign(Gtk.Align.CENTER)
+        header_box.append(logo_card)
+
+        # App Logo (Fixed size 72x72)
+        app_logo_file = project_root / "data" / "icons" / "icono-light-256.png"
         if not app_logo_file.exists():
             app_logo_file = project_root / "data" / "icons" / "icono-dark.png"
 
-        # 2. User Logo ("mi logo")
-        # In data/icons we have: icono_light.png (for light theme) and icono_black.png (for dark theme)
+        if app_logo_file.exists():
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(app_logo_file), 72, 72, True)
+                if pixbuf:
+                    texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                    app_pic = Gtk.Picture.new_for_paintable(texture)
+                    app_pic.set_size_request(72, 72)
+                    app_pic.set_halign(Gtk.Align.CENTER)
+                    app_pic.set_valign(Gtk.Align.CENTER)
+                    app_pic.set_hexpand(False)
+                    app_pic.set_vexpand(False)
+                    app_pic.add_css_class("about-logo")
+                    logo_card.append(app_pic)
+            except Exception as e:
+                print(f"[AboutPage] Error loading app logo: {e}")
+
+        # Decorative separator label
+        sep_lbl = Gtk.Label(label="×")
+        sep_lbl.add_css_class("about-logo-sep")
+        sep_lbl.set_valign(Gtk.Align.CENTER)
+        logo_card.append(sep_lbl)
+
+        # User Logo (Fixed size 72x72)
+        self.user_pic_widget = Gtk.Picture()
+        self.user_pic_widget.set_size_request(72, 72)
+        self.user_pic_widget.set_halign(Gtk.Align.CENTER)
+        self.user_pic_widget.set_valign(Gtk.Align.CENTER)
+        self.user_pic_widget.set_hexpand(False)
+        self.user_pic_widget.set_vexpand(False)
+        self.user_pic_widget.add_css_class("about-logo")
+        logo_card.append(self.user_pic_widget)
+
+        # App Title
+        title_lbl = Gtk.Label()
+        title_lbl.set_markup("<b>Soundwave</b>")
+        title_lbl.add_css_class("title-1")
+        title_lbl.add_css_class("about-title")
+        title_lbl.set_halign(Gtk.Align.CENTER)
+        header_box.append(title_lbl)
+
+        # App Version
+        version_lbl = Gtk.Label(label="Versión 1.1.0")
+        version_lbl.add_css_class("caption")
+        version_lbl.add_css_class("dim-label")
+        version_lbl.add_css_class("about-version")
+        version_lbl.set_halign(Gtk.Align.CENTER)
+        header_box.append(version_lbl)
+
+        # Description
+        desc_lbl = Gtk.Label()
+        desc_lbl.set_markup(
+            "Un reproductor de música nativo para Linux diseñado\n"
+            "con GTK4 y Libadwaita con un enfoque premium."
+        )
+        desc_lbl.add_css_class("body")
+        desc_lbl.add_css_class("dim-label")
+        desc_lbl.add_css_class("about-description")
+        desc_lbl.set_wrap(True)
+        desc_lbl.set_justify(Gtk.Justification.CENTER)
+        desc_lbl.set_halign(Gtk.Align.CENTER)
+        header_box.append(desc_lbl)
+
+
+        # ── Group 2: Información y Redes ─────────────────────────────────
+        info_group = Adw.PreferencesGroup()
+        info_group.set_title("Información y Redes")
+        self.add(info_group)
+
+        # Developer Row
+        dev_row = Adw.ActionRow()
+        dev_row.set_title("Desarrollador")
+        dev_row.set_subtitle("Manuel Pérez (Manuel-Prg)")
+        dev_icon = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+        dev_row.add_prefix(dev_icon)
+        info_group.add(dev_row)
+
+        # Ko-fi Row
+        kofi_row = Adw.ActionRow()
+        kofi_row.set_title("Apoyar en Ko-fi")
+        kofi_row.set_subtitle("kofi.com/O5O2PX2PA")
+        kofi_row.set_activatable(True)
+        
+        # Load Kofi Icon
+        self.kofi_icon_img = Gtk.Image()
+        kofi_icon_file = project_root / "data" / "icons" / "kofi.png"
+        if kofi_icon_file.exists():
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(kofi_icon_file), 24, 24, True)
+                if pixbuf:
+                    self.kofi_icon_img.set_from_pixbuf(pixbuf)
+            except Exception as e:
+                print(f"[AboutPage] Error loading Ko-fi icon: {e}")
+                self.kofi_icon_img.set_from_icon_name("emblem-favorite-symbolic")
+        else:
+            self.kofi_icon_img.set_from_icon_name("emblem-favorite-symbolic")
+            
+        kofi_row.add_prefix(self.kofi_icon_img)
+        
+        # Suffix link icon
+        kofi_link_icon = Gtk.Image.new_from_icon_name("window-new-symbolic")
+        kofi_row.add_suffix(kofi_link_icon)
+        kofi_row.connect("activated", lambda r: webbrowser.open("https://ko-fi.com/O5O2PX2PA"))
+        info_group.add(kofi_row)
+
+        # GitHub Row
+        github_row = Adw.ActionRow()
+        github_row.set_title("Código fuente")
+        github_row.set_subtitle("github.com/Manuel-Prg/sounware-reproductor")
+        github_row.set_activatable(True)
+        
+        self.github_icon_img = Gtk.Image()
+        github_row.add_prefix(self.github_icon_img)
+        
+        # Suffix link icon
+        github_link_icon = Gtk.Image.new_from_icon_name("window-new-symbolic")
+        github_row.add_suffix(github_link_icon)
+        github_row.connect("activated", lambda r: webbrowser.open("https://github.com/Manuel-Prg/sounware-reproductor"))
+        info_group.add(github_row)
+
+
+        # ── Group 3: Licencia y Sistema ──────────────────────────────────
+        system_group = Adw.PreferencesGroup()
+        system_group.set_title("Licencia y Sistema")
+        self.add(system_group)
+
+        # License Row
+        license_row = Adw.ActionRow()
+        license_row.set_title("Licencia")
+        license_row.set_subtitle("Licencia MIT")
+        license_icon = Gtk.Image.new_from_icon_name("document-properties-symbolic")
+        license_row.add_prefix(license_icon)
+        system_group.add(license_row)
+
+        # Tech Row
+        tech_row = Adw.ActionRow()
+        tech_row.set_title("Tecnologías")
+        tech_row.set_subtitle("Python, GTK4, Libadwaita, GStreamer")
+        tech_icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
+        tech_row.add_prefix(tech_icon)
+        system_group.add(tech_row)
+
+        # Connect theme monitoring for user logo & GitHub icon
+        style_manager = Adw.StyleManager.get_default()
+        style_manager.connect("notify::dark", self._on_theme_changed)
+        
+        # Initial call to populate theme-dependent assets
+        self.update_theme_dependent_widgets()
+
+    def update_theme_dependent_widgets(self):
+        style_manager = Adw.StyleManager.get_default()
+        is_dark = style_manager.get_dark()
+        project_root = Path(__file__).resolve().parents[4]
+
+        # Update User Logo
         user_logo_name = "icono_black.png" if is_dark else "icono_light.png"
         user_logo_file = project_root / "data" / "icons" / user_logo_name
         if not user_logo_file.exists():
             user_logo_file = project_root / "data" / "icons" / "icono_light.png"
-
-        # App logo widget
-        app_pic_widget = None
-        if app_logo_file.exists():
-            try:
-                app_pic_widget = Gtk.Picture.new_for_filename(str(app_logo_file))
-                app_pic_widget.set_size_request(88, 88)
-                app_pic_widget.set_halign(Gtk.Align.CENTER)
-                app_pic_widget.set_valign(Gtk.Align.CENTER)
-            except Exception as e:
-                print(f"[AboutPage] Error loading app logo: {e}")
-
-        # User logo widget
-        user_pic_widget = None
+        
         if user_logo_file.exists():
             try:
-                user_pic_widget = Gtk.Picture.new_for_filename(str(user_logo_file))
-                user_pic_widget.set_size_request(88, 88)
-                user_pic_widget.set_halign(Gtk.Align.CENTER)
-                user_pic_widget.set_valign(Gtk.Align.CENTER)
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(user_logo_file), 72, 72, True)
+                if pixbuf:
+                    texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+                    self.user_pic_widget.set_paintable(texture)
             except Exception as e:
-                print(f"[AboutPage] Error loading user logo: {e}")
+                print(f"[AboutPage] Error updating user logo: {e}")
 
-        if app_pic_widget:
-            logos_box.append(app_pic_widget)
-
-        # Decorative X separator between logos
-        x_label = Gtk.Label()
-        x_label.set_markup("<span size='large' alpha='40%' weight='bold'>×</span>")
-        x_label.set_valign(Gtk.Align.CENTER)
-        logos_box.append(x_label)
-
-        if user_pic_widget:
-            logos_box.append(user_pic_widget)
-
-        main_box.append(logos_box)
-
-        # App Title & Version Info
-        info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        info_box.set_halign(Gtk.Align.CENTER)
-
-        title_lbl = Gtk.Label()
-        title_lbl.set_markup("<span size='x-large' weight='bold'>Soundwave</span>")
-        title_lbl.set_halign(Gtk.Align.CENTER)
-        info_box.append(title_lbl)
-
-        version_lbl = Gtk.Label()
-        version_lbl.set_markup("<span size='medium' alpha='70%'>Versión 1.1.0</span>")
-        version_lbl.set_halign(Gtk.Align.CENTER)
-        info_box.append(version_lbl)
-
-        main_box.append(info_box)
-
-        # Developer Info
-        dev_lbl = Gtk.Label()
-        dev_lbl.set_markup("<span size='medium'>Desarrollado por <b>Manuel Pérez (Manuel-Prg)</b></span>")
-        dev_lbl.set_halign(Gtk.Align.CENTER)
-        main_box.append(dev_lbl)
-
-        # App Description
-        desc_lbl = Gtk.Label()
-        desc_lbl.set_markup(
-            "<span size='small' alpha='65%'>Un reproductor de música nativo para Linux diseñado\n"
-            "con GTK4 y Libadwaita con un enfoque premium.</span>"
-        )
-        desc_lbl.set_wrap(True)
-        desc_lbl.set_justify(Gtk.Justification.CENTER)
-        desc_lbl.set_halign(Gtk.Align.CENTER)
-        main_box.append(desc_lbl)
-
-        # Social & Support Buttons Box
-        buttons_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        buttons_box.set_margin_top(12)
-        buttons_box.set_halign(Gtk.Align.FILL)
-
-        # ── Ko-fi Support Button ──────────────────────────────────────────
-        kofi_btn = Gtk.Button()
-        kofi_btn.set_tooltip_text("Apóyame en Ko-fi")
-        kofi_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        kofi_btn_box.set_halign(Gtk.Align.CENTER)
-        kofi_btn_box.set_valign(Gtk.Align.CENTER)
-
-        # Ko-fi Icon
-        kofi_icon_file = project_root / "data" / "icons" / "kofi.png"
-        if kofi_icon_file.exists():
-            try:
-                # Icon has a colormap aspect ratio of ~285x229
-                kofi_icon = Gtk.Picture.new_for_filename(str(kofi_icon_file))
-                kofi_icon.set_size_request(24, 19)
-                kofi_icon.set_valign(Gtk.Align.CENTER)
-                kofi_btn_box.append(kofi_icon)
-            except Exception as e:
-                print(f"[AboutPage] Error loading Ko-fi icon file: {e}")
-        else:
-            kofi_fallback = Gtk.Image.new_from_icon_name("emblem-favorite-symbolic")
-            kofi_btn_box.append(kofi_fallback)
-
-        kofi_lbl = Gtk.Label()
-        kofi_lbl.set_markup("<span weight='bold'>Apóyame en Ko-fi</span>")
-        kofi_btn_box.append(kofi_lbl)
-        kofi_btn.set_child(kofi_btn_box)
-        kofi_btn.set_css_classes(["suggested-action", "pill"])
-        kofi_btn.set_size_request(200, 38)
-        kofi_btn.connect("clicked", lambda b: webbrowser.open("https://ko-fi.com/O5O2PX2PA"))
-        buttons_box.append(kofi_btn)
-
-        # ── GitHub Repository Button ──────────────────────────────────────
-        github_btn = Gtk.Button()
-        github_btn.set_tooltip_text("Ver repositorio del proyecto en GitHub")
-        github_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        github_btn_box.set_halign(Gtk.Align.CENTER)
-        github_btn_box.set_valign(Gtk.Align.CENTER)
-
-        # GitHub Icon
+        # Update GitHub Icon
         github_icon_name = "GitHub_Invertocat_White_Clearspace.svg" if is_dark else "GitHub_Invertocat_Black_Clearspace.svg"
         github_icon_file = project_root / "data" / "icons" / github_icon_name
         if github_icon_file.exists():
             try:
-                github_icon = Gtk.Picture.new_for_filename(str(github_icon_file))
-                github_icon.set_size_request(20, 20)
-                github_icon.set_valign(Gtk.Align.CENTER)
-                github_btn_box.append(github_icon)
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(github_icon_file), 24, 24, True)
+                if pixbuf:
+                    self.github_icon_img.set_from_pixbuf(pixbuf)
             except Exception as e:
-                print(f"[AboutPage] Error loading GitHub icon: {e}")
-        else:
-            github_fallback = Gtk.Image.new_from_icon_name("folder-music-symbolic")
-            github_btn_box.append(github_fallback)
+                print(f"[AboutPage] Error updating GitHub icon: {e}")
 
-        github_lbl = Gtk.Label()
-        github_lbl.set_markup("<span>Ver en GitHub</span>")
-        github_btn_box.append(github_lbl)
-        github_btn.set_child(github_btn_box)
-        github_btn.set_css_classes(["flat", "pill"])
-        github_btn.set_size_request(200, 38)
-        github_btn.connect("clicked", lambda b: webbrowser.open("https://github.com/Manuel-Prg/sounware-reproductor"))
-        buttons_box.append(github_btn)
-
-        main_box.append(buttons_box)
-        group.add(main_box)
+    def _on_theme_changed(self, style_manager, pspec):
+        self.update_theme_dependent_widgets()
